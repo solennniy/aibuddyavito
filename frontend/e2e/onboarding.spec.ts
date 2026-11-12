@@ -1,7 +1,22 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type APIRequestContext } from '@playwright/test'
 
 type DemoUser = { role: string; token: string }
 type Ticket = { id: string; ticket_id: string; status: string }
+
+async function internWithoutRequests(request: APIRequestContext) {
+  const session = await request.get('/api/session')
+  expect(session.ok()).toBeTruthy()
+  const { users }: { users: DemoUser[] } = await session.json()
+  for (const user of users.filter((entry) => entry.role === 'intern')) {
+    const list = await request.get('/api/requests', {
+      headers: { Authorization: `Bearer ${user.token}` },
+    })
+    expect(list.ok()).toBeTruthy()
+    const { requests } = await list.json()
+    if (requests.length === 0) return user
+  }
+  throw new Error('Нет стажёра без заявок')
+}
 
 test('стажёр проходит путь от задачи до сохранённой заявки', async ({ page, request }, info) => {
   const session = await request.get('/api/session')
@@ -76,9 +91,13 @@ test('стажёр проходит путь от задачи до сохран
   await expect(page.getByText('Можно начать · доступ выдан')).toBeVisible()
 })
 
-test('панель на мобильном экране не выходит за границы окна', async ({ page }, info) => {
+test('панель на мобильном экране не выходит за границы окна', async ({ page, request }, info) => {
+  // Another test may have already granted this intern access, which removes the
+  // help link. Pick an intern without requests so the panel state is independent.
+  const intern = await internWithoutRequests(request)
   await page.setViewportSize({ width: 375, height: 812 })
   await page.goto('/')
+  await page.locator('#identity').selectOption(intern.token)
   await expect(page.getByRole('link', { name: 'Получить помощь' }).first()).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375)
   await page.screenshot({ path: info.outputPath('dashboard-mobile.png'), fullPage: true })
