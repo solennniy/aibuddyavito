@@ -1,0 +1,16 @@
+.git
+.deps
+.venv
+.venv-deps
+__pycache__
+**/__pycache__
+**/node_modules
+**/.pytest_cache
+**/coverage
+**/test-results
+.env
+.coverage
+coverage.xml
+*.xlsx
+*.sqlite3
+data
