@@ -50,3 +50,28 @@ jobs:
             frontend/coverage/
             frontend/playwright-report/
             frontend/test-results/
+
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file
+        run: docker compose config --quiet
+      - name: Build API image
+        run: docker build --file backend/Dockerfile --tag aibuddy-api .
+      - name: Build web image
+        run: docker build --file frontend/Dockerfile --tag aibuddy-web frontend
+      - name: Check the API container starts
+        run: |
+          docker run --detach --name aibuddy-api --publish 8000:8000 aibuddy-api
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8000/api/session > /dev/null; then
+              echo "API answered on attempt $attempt"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not start"
+          docker logs aibuddy-api
+          exit 1
