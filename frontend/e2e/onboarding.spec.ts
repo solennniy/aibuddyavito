@@ -85,7 +85,7 @@ test('стажёр проходит путь от задачи до сохран
   await expect(page.getByText(/^Пока ждёте:/)).toBeVisible()
   await page.getByRole('link', { name: 'Проверить заявку' }).click()
   await page.getByRole('button', { name: 'Демо: подтвердить выдачу доступа' }).click()
-  await expect(page.getByText('Доступ выдан', { exact: true })).toBeVisible()
+  await expect(page.getByText('Доступ выдан', { exact: true }).first()).toBeVisible()
   await page.getByRole('link', { name: 'Обзор', exact: true }).click()
   await page.reload()
   await expect(page.getByText('Можно начать · доступ выдан')).toBeVisible()

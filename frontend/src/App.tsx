@@ -7,10 +7,12 @@ const periods: Record<string, string> = {
   week_1: 'Первая неделя', week_2: 'Вторая неделя', month_1: 'Первый месяц',
   month_2: 'Второй месяц', month_3_plus: 'После трёх месяцев',
 }
-const statuses: Record<string, string> = {
+const taskStatuses: Record<string, string> = {
   todo: 'Предстоит', in_progress: 'В работе', completed: 'Выполнено', blocked: 'Заблокировано',
+}
+const requestStatuses: Record<string, string> = {
   draft: 'Черновик', submitted: 'Отправлена в учебный сервис', in_review: 'Рассматривается',
-  approved: 'Согласована', rejected: 'Отклонена', failed: 'Ошибка обработки',
+  approved: 'Согласована', rejected: 'Отклонена', failed: 'Ошибка обработки', completed: 'Доступ выдан',
 }
 const roles: Record<string, string> = { intern: 'Стажёр', mentor: 'Наставник', admin: 'Администратор' }
 const help = '/assistant?question=' + encodeURIComponent('Как получить доступ к пространству команды?')
@@ -21,12 +23,12 @@ function ErrorNotice({ error, retry }: { error: Error; retry?: () => void }) {
   return <div className="error" role="alert">{error.message}{retry && <button className="quiet" onClick={retry}>Повторить</button>}</div>
 }
 
-function RequestHistory({ requests }: { requests: AccessRequest[] }) {
+function RequestHistory({ requests, empty = 'Заявок пока нет.' }: { requests: AccessRequest[]; empty?: string }) {
   return requests.length ? <ul className="rows">{requests.map(request =>
     <li key={request.id} className="row">
       <div><strong>{request.ticket_id ?? 'Заявка на доступ'}</strong><p>{request.reason}</p><p>{request.next_step}</p></div>
-      <span className="status" data-status={request.status}>{statuses[request.status] ?? request.status}</span>
-    </li>)}</ul> : <p className="muted">Заявок пока нет.</p>
+      <span className="status" data-status={request.status}>{requestStatuses[request.status] ?? request.status}</span>
+    </li>)}</ul> : <p className="muted">{empty}</p>
 }
 
 function Dashboard({ user, tasks, requests, firstTask }: { user: User; tasks: Task[]; requests: AccessRequest[]; firstTask?: FirstTask | null }) {
@@ -58,7 +60,7 @@ function Dashboard({ user, tasks, requests, firstTask }: { user: User; tasks: Ta
       </section>}
       <section className="panel">
         <h2>Ближайшие задачи</h2>
-        <ul className="rows">{upcoming.slice(0, 4).map(task => <li key={task.id} className="row">{task.title}<span className="status">{statuses[task.status]}</span></li>)}</ul>
+        <ul className="rows">{upcoming.slice(0, 4).map(task => <li key={task.id} className="row">{task.title}<span className="status">{taskStatuses[task.status]}</span></li>)}</ul>
         {!upcoming.length && <p className="muted">Ближайших задач нет.</p>}
         <Link to="/checklist">Открыть чек-лист</Link>
       </section>
@@ -88,7 +90,7 @@ function Checklist({ tasks, token }: { tasks: Task[]; token: string }) {
           {task.document_ids.map(id => <p key={id}><Link to={'/knowledge#' + id}>Открыть инструкцию</Link></p>)}
           {task.request_ids.length > 0 && <Link to="/requests">Связанные заявки ({task.request_ids.length})</Link>}
         </div>
-        <span className="status" data-status={task.status}>{statuses[task.status]}</span>
+        <span className="status" data-status={task.status}>{taskStatuses[task.status]}</span>
       </li>)}</ul>
     </section>)}
   </>
@@ -156,6 +158,9 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
     onSuccess: ({ request }) => { setSelected(request); void updateHistory(); void client.invalidateQueries({ queryKey: ['tasks', token] }) },
   })
   const pending = prepare.isPending || confirm.isPending || grant.isPending
+  // Drafts live in the confirmation panel or the resume list, not in the sent history.
+  const sent = requests.filter(request => !['draft', 'failed'].includes(request.status))
+  const drafts = requests.filter(request => ['draft', 'failed'].includes(request.status))
   return <>
     <header className="intro"><h1>Мои заявки</h1><p>Заявки отправляются в учебный сервис</p></header>
     <div className="dashboard">
@@ -173,19 +178,20 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
             <p>{selected.reason}</p><p>{selected.next_step}</p>
             {['draft', 'failed'].includes(selected.status) ?
               <button id="confirm" onClick={() => confirm.mutate(selected.id)} disabled={pending}>Подтвердить отправку</button>
-              : <p className="status" data-status={selected.status}>{selected.status === 'completed' ? 'Доступ выдан' : statuses[selected.status]}</p>}
+              : <p className="status" data-status={selected.status}>{requestStatuses[selected.status]}</p>}
             {confirm.error && <ErrorNotice error={confirm.error} retry={() => confirm.mutate(selected.id)} />}
           </div>}
           {pending && <p role="status">Обрабатываем заявку…</p>}
         </> : <p className="muted">Создание заявок доступно стажёрам.</p>}
       </section>
       <section className="panel">
-        <h2>История заявок</h2><RequestHistory requests={requests} />
-        {user.role === 'intern' && requests.filter(request => request.status === 'submitted').map(request =>
+        <h2>История заявок</h2>
+        <RequestHistory requests={sent} empty="Отправленных заявок пока нет." />
+        {user.role === 'intern' && sent.filter(request => request.status === 'submitted').map(request =>
           <button className="quiet" key={request.id} disabled={pending} onClick={() => grant.mutate(request.id)}>Демо: подтвердить выдачу доступа</button>
         )}
         {grant.error && <ErrorNotice error={grant.error} />}
-        {user.role === 'intern' && requests.filter(request => ['draft', 'failed'].includes(request.status)).map(request =>
+        {user.role === 'intern' && drafts.filter(request => request.id !== selected?.id).map(request =>
           <button className="quiet" key={request.id} onClick={() => { confirm.reset(); setSelected(request) }}>Открыть черновик: {request.reason}</button>
         )}
       </section>

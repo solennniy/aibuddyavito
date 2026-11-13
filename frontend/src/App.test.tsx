@@ -92,7 +92,7 @@ describe('AI Buddy workspace', () => {
     await waitFor(() => expect(screen.getAllByText('DEMO-001').length).toBeGreaterThan(0))
     expect(mock.mock.calls.find(([url]) => url.endsWith('/confirm'))?.[1].body).toBe('{"confirmed":true}')
     switchTo('intern-ivan')
-    await screen.findByText('Заявок пока нет.')
+    await screen.findByText('Отправленных заявок пока нет.')
     expect(screen.queryByText('DEMO-001')).toBeNull()
     switchTo('mentor')
     await screen.findByText('Создание заявок доступно стажёрам.')

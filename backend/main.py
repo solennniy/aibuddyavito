@@ -268,6 +268,15 @@ def create_app(database_path=None):
             if ticket is None or row.status not in {"submitted", "completed"}:
                 raise HTTPException(409, "Сначала отправьте заявку в учебный сервис.")
             row.status = "completed"
+            # A granted access closes the checklist step that depended on it.
+            task_id = RESOURCE_TASK.get(row.resource)
+            if task_id:
+                progress = db.get(TaskProgress, (user["id"], task_id))
+                if progress is None:
+                    progress = TaskProgress(owner=user["id"], task_id=task_id)
+                    db.add(progress)
+                progress.status = "completed"
+                progress.completed_at = now()
             payload = serialize_request(row, ticket)
             db.commit()
         return {"request": payload}

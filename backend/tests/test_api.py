@@ -69,6 +69,13 @@ def test_first_task_unlocks_only_after_demo_grant(client):
     assert confirm(client, draft).json()["request"] == result
     assert state() == "ready"
     assert state(IVAN) == "blocked"
+    # A granted access also closes the checklist step that depended on it.
+    tasks = client.get("/api/tasks", headers=ANNA).json()["tasks"]
+    access = next(task for task in tasks if task["id"] == TASK_ID)
+    assert access["status"] == "completed"
+    assert access["completed_at"]
+    assert next(task for task in client.get("/api/tasks", headers=IVAN).json()["tasks"]
+                if task["id"] == TASK_ID)["status"] == "todo"
 
 
 def test_chat_sources_and_action_permission(client):
