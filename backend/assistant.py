@@ -21,8 +21,22 @@ DOCUMENTS = (
         "title": "Учебная памятка о первых шагах стажёра",
         "content": (
             "Познакомьтесь с командой и наставником, проверьте доступы и изучите "
-            "пространство команды. Если нужной инструкции нет, обратитесь к наставнику."
+            "пространство команды. Откройте «Чек-лист» и выберите ближайший невыполненный пункт."
         ),
+        "source_type": "synthetic",
+        "roles": ("intern", "mentor"),
+    },
+    {
+        "id": "first-pr",
+        "title": "Учебная памятка по первому PR",
+        "content": "Откройте описание первой задачи и документацию команды. Уточните критерии готовности, создайте отдельную ветку, внесите небольшое изменение и запустите тесты перед отправкой PR.",
+        "source_type": "synthetic",
+        "roles": ("intern", "mentor"),
+    },
+    {
+        "id": "first-meeting",
+        "title": "Учебная памятка о знакомстве с командой",
+        "content": "Представьтесь в канале команды. На первой встрече с наставником обсудите цели на неделю, нужные инструменты и первую задачу. Запишите договорённости в своём чек-листе.",
         "source_type": "synthetic",
         "roles": ("intern", "mentor"),
     },
@@ -42,10 +56,14 @@ def visible_documents(role):
 
 
 def intent(message):
-    question = message.casefold()
-    if any(word in question for word in ("доступ", "пространств", "заявк")):
+    question = message.casefold().replace("ё", "е")
+    if any(word in question for word in ("доступ", "пространств", "заявк", "confluence", "jira", "право", "права", "разрешен", "не пускает")):
         return "team-space"
-    if any(word in question for word in ("перв", "стаж", "начат", "шаг", "наставник", "адаптац")):
+    if any(word in question for word in ("pull request", " pr", "пул-реквест", "первый коммит", "ветку", "архитектур")) or question.startswith("pr"):
+        return "first-pr"
+    if any(word in question for word in ("знаком", "представиться", "1:1", "встреч", "онбординг-колл")):
+        return "first-meeting"
+    if any(word in question for word in ("перв", "стаж", "начат", "шаг", "наставник", "адаптац", "онбординг", "чек-лист", "чеклист", "что делать")):
         return "onboarding"
     return None
 
@@ -105,7 +123,7 @@ def answer_question(message, role):
     sources = [doc for doc in candidates if doc["id"] == chosen_id]
     return {
         "answer": sources[0]["content"] if sources else (
-            "В доступных учебных инструкциях нет ответа. Уточните вопрос или обратитесь к наставнику."
+            "По этому вопросу нет учебной инструкции. Уточните, что нужно сделать: запросить доступ, познакомиться с командой или подготовить первый PR."
         ),
         "sources": [{"id": doc["id"], "title": doc["title"]} for doc in sources],
         "mode": mode,

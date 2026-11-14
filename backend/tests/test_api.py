@@ -45,7 +45,7 @@ def test_demo_auth_and_knowledge(client):
     assert client.get("/api/me", headers={"Authorization": "Bearer forged"}).status_code == 401
     assert client.get("/api/me", headers=ANNA).json()["id"] == "intern-001"
     assert {d["id"] for d in client.get("/api/knowledge", headers=ANNA).json()["documents"]} == {
-        "onboarding", "team-space"
+        "onboarding", "team-space", "first-pr", "first-meeting"
     }
     assert "mentor-only" in {d["id"] for d in client.get("/api/knowledge", headers=MENTOR).json()["documents"]}
 
@@ -82,10 +82,33 @@ def test_chat_sources_and_action_permission(client):
     assert client.post("/api/chat", json={"message": "Первые шаги стажёра"}, headers=ANNA).json()[
         "sources"][0]["id"] == "onboarding"
     assert client.post("/api/chat", json={"message": "Какой сегодня курс?"}, headers=ANNA).json()["sources"] == []
+    for question, source in (("Как оформить первый PR?", "first-pr"),
+                             ("Как представиться команде?", "first-meeting"),
+                             ("Confluence меня не пускает", "team-space")):
+        assert client.post("/api/chat", json={"message": question}, headers=ANNA).json()["sources"][0]["id"] == source
     for body in ([], {"message": 123}, {"message": "  "}, {"message": "x" * 2001}):
         result = client.post("/api/chat", json=body, headers=ANNA)
         assert result.status_code == 422
         assert result.json()["detail"] == "Проверьте поля и формат запроса."
+
+
+def test_mentor_sees_only_assigned_submitted_requests(client, monkeypatch):
+    monkeypatch.setitem(main.MENTOR_INTERNS, "mentor-001", {"intern-001": "Анна"})
+    draft = create_request(client)
+    other = create_request(client, headers=IVAN)
+    assert confirm(client, other, headers=IVAN).status_code == 200
+    assert client.get("/api/requests", headers=MENTOR).json()["requests"] == []
+    assert confirm(client, draft).status_code == 200
+    rows = client.get("/api/requests", headers=MENTOR).json()["requests"]
+    assert [(row["id"], row["intern_name"]) for row in rows] == [(draft["id"], "Анна")]
+    assert confirm(client, draft, headers=MENTOR).status_code == 403
+    fresh_headers = {**ANNA, "Idempotency-Key": "new-submission"}
+    fresh = create_request(client, headers=fresh_headers)
+    assert fresh["id"] != draft["id"]
+    assert create_request(client, headers=fresh_headers) == fresh
+    assert confirm(client, fresh).status_code == 200
+    rows = client.get("/api/requests", headers=MENTOR).json()["requests"]
+    assert [row["id"] for row in rows] == [fresh["id"], draft["id"]]
 
 
 def test_checklist_identity_roles_and_owner_progress(client):
@@ -129,7 +152,9 @@ def test_restart_and_duplicate_confirmation(tmp_path):
         assert confirm(client, draft).json()["request"] == sent
         assert client.get("/api/requests", headers=ANNA).json()["requests"] == [sent]
         assert client.get("/api/requests", headers=IVAN).json()["requests"] == []
-        assert client.get("/api/requests", headers=MENTOR).json()["requests"] == []
+        assert client.get("/api/requests", headers=MENTOR).json()["requests"] == [
+            {**sent, "intern_name": "Анна"}
+        ]
         task = next(t for t in client.get("/api/tasks", headers=ANNA).json()["tasks"] if t["id"] == TASK_ID)
         assert task["status"] == "completed"
         assert task["request_ids"] == [draft["id"]]

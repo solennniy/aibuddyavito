@@ -58,7 +58,11 @@ function fixture(path = '/') {
 const link = (name: string) => within(screen.getByRole('navigation')).getByRole('link', { name })
 const fill = (name: string, value: string) => fireEvent.change(screen.getByRole('textbox', { name }), { target: { value } })
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
-const switchTo = (value: string) => fireEvent.change(screen.getByLabelText('Демо-профиль'), { target: { value } })
+function switchTo(value: string, returnTo: string) {
+  fireEvent.click(screen.getByRole('link', { name: 'Открыть профиль' }))
+  fireEvent.change(screen.getByLabelText('Демо-профиль'), { target: { value } })
+  fireEvent.click(link(returnTo))
+}
 
 beforeEach(() => sessionStorage.clear())
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -91,10 +95,10 @@ describe('AI Buddy workspace', () => {
     click('Повторить')
     await waitFor(() => expect(screen.getAllByText('DEMO-001').length).toBeGreaterThan(0))
     expect(mock.mock.calls.find(([url]) => url.endsWith('/confirm'))?.[1].body).toBe('{"confirmed":true}')
-    switchTo('intern-ivan')
+    switchTo('intern-ivan', 'Мои заявки')
     await screen.findByText('Заявок пока нет.')
     expect(screen.queryByText('DEMO-001')).toBeNull()
-    switchTo('mentor')
+    switchTo('mentor', 'Заявки стажёров')
     await screen.findByText('Создание заявок доступно стажёрам.')
   })
 
@@ -113,7 +117,7 @@ describe('AI Buddy workspace', () => {
     fireEvent.click(link('Чек-лист'))
     fireEvent.click(screen.getByRole('checkbox', { name: 'Прочитать введение' }))
     await waitFor(() => expect((screen.getByRole('checkbox', { name: 'Прочитать введение' }) as HTMLInputElement).checked).toBe(false))
-    switchTo('mentor')
+    switchTo('mentor', 'Чек-лист')
     await screen.findByText('У этой роли нет задач стажёра.')
   })
 })

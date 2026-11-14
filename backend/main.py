@@ -31,6 +31,7 @@ CHECKLIST = {task["id"]: task for task in json.loads(
     Path(__file__).with_name("checklist.json").read_text(encoding="utf-8")
 )}
 RESOURCE_TASK = {"team_workspace": "task-access-workspace"}
+MENTOR_INTERNS = {"mentor-001": {"intern-001": "Анна", "intern-002": "Иван"}}
 FIRST_TASK_REASON = "Нужно изучить архитектуру команды и подготовить первый PR."
 
 
@@ -197,10 +198,16 @@ def create_app(database_path=None):
     @app.get("/api/requests")
     def requests(user: User):
         with Session(engine) as db:
+            assigned = MENTOR_INTERNS.get(user["id"], {})
+            scope = (AccessRequest.owner.in_(assigned) & MockTicket.ticket_id.is_not(None)
+                     if user["role"] == "mentor" else AccessRequest.owner == user["id"])
             rows = db.execute(select(AccessRequest, MockTicket).outerjoin(MockTicket).where(
-                AccessRequest.owner == user["id"]
+                scope
             ).order_by(AccessRequest.created_at.desc()))
-            return {"requests": [serialize_request(row, ticket) for row, ticket in rows]}
+            return {"requests": [
+                {**serialize_request(row, ticket), **({"intern_name": assigned[row.owner]} if assigned else {})}
+                for row, ticket in rows
+            ]}
 
     @app.post("/api/requests", status_code=201)
     def create_draft(

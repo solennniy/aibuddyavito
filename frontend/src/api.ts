@@ -30,6 +30,7 @@ export interface ChatAnswer {
   action: { resource: 'team_workspace' } | null
 }
 export interface AccessRequest {
+  intern_name?: string
   id: string
   resource: string
   reason: string
@@ -38,12 +39,13 @@ export interface AccessRequest {
   next_step: string
 }
 
-export async function api<T>(path: string, token = '', body?: object, method = 'POST'): Promise<T> {
+export async function api<T>(path: string, token = '', body?: object, method = 'POST', idempotencyKey?: string): Promise<T> {
   const response = await fetch('/api' + path, {
     method: body ? method : 'GET',
     headers: {
       ...(token ? { Authorization: 'Bearer ' + token } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   })

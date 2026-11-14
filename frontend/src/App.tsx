@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useSearchParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type AccessRequest, type ChatAnswer, type DemoUser, type Document, type Task, type User } from './api'
@@ -24,7 +24,7 @@ function ErrorNotice({ error, retry }: { error: Error; retry?: () => void }) {
 function RequestHistory({ requests }: { requests: AccessRequest[] }) {
   return requests.length ? <ul className="rows">{requests.map(request =>
     <li key={request.id} className="row">
-      <div><strong>{request.ticket_id ?? 'Заявка на доступ'}</strong><p>{request.reason}</p><p>{request.next_step}</p></div>
+      <div><strong>{request.ticket_id ?? 'Заявка на доступ'}</strong>{request.intern_name && <p>Стажёр: {request.intern_name}</p>}<p>{request.reason}</p><p>{request.next_step}</p></div>
       <span className="status" data-status={request.status}>{statuses[request.status] ?? request.status}</span>
     </li>)}</ul> : <p className="muted">Заявок пока нет.</p>
 }
@@ -46,7 +46,7 @@ function Dashboard({ user, tasks, requests, firstTask }: { user: User; tasks: Ta
       </section>
       {user.role === 'intern' && <section className="panel next-step"><h2>Первая рабочая задача</h2>
         <p><strong>{firstTask?.title ?? 'Доступ к команде'}</strong></p>
-        {firstTask?.state === 'ready' ? <p role="status">Можно начать · доступ выдан</p> :
+        {firstTask?.state === 'ready' ? <p role="status">Можно начать, доступ выдан</p> :
           firstTask?.state === 'waiting' ? <>
             <p role="status">Задача ждёт доступа</p>
             {firstTask.alternative && <p>Пока ждёте: {firstTask.alternative}</p>}
@@ -62,8 +62,8 @@ function Dashboard({ user, tasks, requests, firstTask }: { user: User; tasks: Ta
         {!upcoming.length && <p className="muted">Ближайших задач нет.</p>}
         <Link to="/checklist">Открыть чек-лист</Link>
       </section>
-      <section className="panel"><h2>Последние заявки</h2><RequestHistory requests={requests.slice(0, 3)} /><Link to="/requests">Открыть заявки</Link></section>
-      <section className="panel"><h2>Заблокированные задачи</h2>{blocked.length ? <ul>{blocked.map(task => <li key={task.id}>{task.title}</li>)}</ul> : <p className="muted">Заблокированных задач нет.</p>}</section>
+      <section className="panel"><h2>{user.role === 'mentor' ? 'Заявки стажёров' : 'Последние заявки'}</h2><RequestHistory requests={requests.slice(0, 3)} /><Link to="/requests">Открыть заявки</Link></section>
+      <section className="panel"><h2>Заблокированные задачи</h2>{firstTask && firstTask.state !== 'ready' && <p>{firstTask.title} — {firstTask.state === 'waiting' ? 'ожидает выдачи доступа' : 'нужен доступ к пространству команды'}</p>}{blocked.length > 0 && <ul>{blocked.map(task => <li key={task.id}>{task.title}</li>)}</ul>}{!blocked.length && (!firstTask || firstTask.state === 'ready') && <p className="muted">Заблокированных задач нет.</p>}</section>
     </div>
   </>
 }
@@ -117,7 +117,7 @@ function Assistant({ token, canRequest, history, addEntry }: {
         <div className="messages" aria-live="polite">
           <p className="intro-message">Спросите, как пройти этап адаптации или запросить доступ к пространству команды.</p>
           {history.map(({ question: asked, result }, index) => <article key={index}>
-            <p className="asked">{asked}</p><div className="reply"><strong>AI Buddy · {result.mode === 'demo' ? 'деморежим' : 'ответ модели'}</strong><p>{result.answer}</p>
+            <p className="asked">{asked}</p><div className="reply"><strong>AI Buddy</strong><p>{result.answer}</p>
             {result.sources.length > 0 && <details className="sources"><summary>Источники</summary><ul>{result.sources.map(source => <li key={source.id}><Link to={'/knowledge#' + source.id}>{source.title}</Link></li>)}</ul></details>}
             {result.action && <Link className="button secondary" to={params.has('reason') ? '/requests?' + new URLSearchParams({ reason: params.get('reason')! }) : '/requests'}>Создать заявку</Link>}
             </div>
@@ -141,9 +141,10 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
   const [params] = useSearchParams()
   const [reason, setReason] = useState(() => (params.get('reason') ?? '').slice(0, 500))
   const [selected, setSelected] = useState<AccessRequest | null>(null)
-  const updateHistory = () => client.invalidateQueries({ queryKey: ['requests', token] })
+  const updateHistory = () => client.invalidateQueries({ queryKey: ['requests'] })
   const prepare = useMutation({
-    mutationFn: () => api<{ request: AccessRequest }>('/requests', token, { resource: 'team_workspace', reason: reason.trim() }),
+    mutationFn: ({ reason, key }: { reason: string; key: string }) =>
+      api<{ request: AccessRequest }>('/requests', token, { resource: 'team_workspace', reason }, 'POST', key),
     onSuccess: ({ request }) => { setSelected(request); setReason(''); void updateHistory() },
   })
   const confirm = useMutation({
@@ -157,12 +158,20 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
   })
   const pending = prepare.isPending || confirm.isPending || grant.isPending
   return <>
-    <header className="intro"><h1>Мои заявки</h1><p>Заявки отправляются в учебный сервис</p></header>
+    <header className="intro"><h1>{user.role === 'mentor' ? 'Заявки стажёров' : 'Мои заявки'}</h1><p>{user.role === 'mentor' ? 'Отправленные заявки закреплённых за вами стажёров' : 'Заявки отправляются в учебный сервис'}</p></header>
     <div className="dashboard">
       <section className="panel">
         <h2>Доступ к пространству команды</h2>
         {user.role === 'intern' ? <>
-          <form className="composer" onSubmit={event => { event.preventDefault(); if (reason.trim()) { confirm.reset(); prepare.mutate() } }}>
+          <form className="composer" onSubmit={event => {
+            event.preventDefault()
+            const value = reason.trim()
+            if (pending || !value) return
+            confirm.reset()
+            const previous = prepare.variables
+            const key = prepare.isError && previous?.reason === value ? previous.key : crypto.randomUUID()
+            prepare.mutate({ reason: value, key })
+          }}>
             <label htmlFor="reason">Зачем нужен доступ</label>
             <textarea id="reason" value={reason} onChange={event => setReason(event.target.value)} maxLength={500} required />
             <button type="submit" id="prepare" disabled={pending}>Подготовить заявку</button>
@@ -194,6 +203,16 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
 }
 
 function Knowledge({ token }: { token: string }) {
+  const resources = [
+    ['Чек-лист стажёра', 'Этапы адаптации и материалы для backend-стажёров', 'https://docs.google.com/spreadsheets/d/1qKFqOzfSZ2jEz57jBSmq7rukDXi_tRfWohgemViceV0/edit?usp=sharing'],
+    ['AvitoTech Playbook', 'Процессы, стандарты и культура инженерных команд', 'https://github.com/avito-tech/playbook'],
+    ['AvitoTech на Хабре', 'Инженерные статьи и примеры инструментов', 'https://habr.com/ru/companies/avito/articles/'],
+    ['AvitoTech', 'Материалы о технологиях и командах', 'https://avito.tech/'],
+    ['AvitoTech Internship', 'Стажировки и задания прошлых наборов', 'https://github.com/avito-tech/tech-internship'],
+    ['Дизайн-система Авито', 'Как устроена библиотека компонентов в Figma', 'https://habr.com/ru/companies/avito/articles/543450/'],
+    ['Стажировки Авито', 'Информация о программах стажировок', 'https://start.avito.ru/internships'],
+    ['Доклад о дизайн-системе', 'Видео о дизайн-системе Авито', 'https://rutube.ru/video/6a203a00a9ef7cdd25d811a01cacd61b/'],
+  ]
   const result = useQuery({ queryKey: ['knowledge', token], queryFn: () => api<{ documents: Document[] }>('/knowledge', token) })
   return <><header className="intro"><h1>База знаний</h1><p>Инструкции, доступные вашей роли</p></header>
     {result.isPending && <p role="status">Загружаем инструкции…</p>}
@@ -202,6 +221,13 @@ function Knowledge({ token }: { token: string }) {
       <h2>{document.title}</h2><p>{document.content}</p><small className="muted">Учебный материал</small>
     </section>)}
     {result.data?.documents.length === 0 && <p>Доступных инструкций нет.</p>}
+    <section className="panel stack">
+      <h2>Открытые материалы Авито</h2>
+      <p className="muted">Источники из кейса помогут познакомиться с компанией и инструментами.</p>
+      <ul className="rows">{resources.map(([title, description, url]) =>
+        <li className="row" key={url}><div><a href={url} target="_blank" rel="noopener noreferrer">{title} ↗</a><p>{description}</p></div></li>
+      )}</ul>
+    </section>
   </>
 }
 
@@ -209,7 +235,12 @@ function Workspace({ token }: { token: string }) {
   const [history, setHistory] = useState<ChatEntry[]>([])
   const profile = useQuery({ queryKey: ['profile', token], queryFn: () => api<User>('/me', token) })
   const tasks = useQuery({ queryKey: ['tasks', token], queryFn: () => api<{ tasks: Task[]; first_task?: FirstTask | null }>('/tasks', token) })
-  const requests = useQuery({ queryKey: ['requests', token], queryFn: () => api<{ requests: AccessRequest[] }>('/requests', token) })
+  const requests = useQuery({
+    queryKey: ['requests', token],
+    queryFn: () => api<{ requests: AccessRequest[] }>('/requests', token),
+    refetchOnMount: 'always',
+    refetchInterval: profile.data?.role === 'mentor' ? 5000 : false,
+  })
   const errors = [profile, tasks, requests].filter(result => result.error)
   if (errors.length) return <ErrorNotice error={errors[0].error!} retry={() => errors.forEach(result => void result.refetch())} />
   if (!profile.data || !tasks.data || !requests.data) return <p role="status">Загружаем ваш маршрут…</p>
@@ -227,32 +258,63 @@ export function App() {
   const session = useQuery({ queryKey: ['session'], queryFn: () => api<{ users: DemoUser[] }>('/session') })
   const client = useQueryClient()
   const [preferred, setPreferred] = useState(() => sessionStorage.getItem('buddy-profile') ?? '')
+  const [theme, setTheme] = useState(() => localStorage.getItem('buddy-theme') ?? 'system')
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('buddy-theme', theme)
+  }, [theme])
   const users = session.data?.users ?? []
   const current = users.find(user => user.token === preferred) ?? users[0]
   return <>
     <header className="topbar">
       <Link to="/" className="brand"><span className="mark" aria-hidden="true"><i /><i /><i /><i /></span>AI Buddy</Link>
-      <label htmlFor="identity">Демо-профиль <select id="identity" disabled={!users.length} value={current?.token ?? ''} onChange={event => {
-        if (current) client.removeQueries({ predicate: query => query.queryKey.includes(current.token) })
-        sessionStorage.setItem('buddy-profile', event.target.value)
-        setPreferred(event.target.value)
-      }}>
-        {!users.length && <option value="">Загрузка…</option>}
-        {users.map(user => <option key={user.token} value={user.token}>{user.name} · {roles[user.role] ?? user.role}</option>)}
-      </select></label>
+      <div className="topbar-controls">
+      <NavLink to="/profile" className="profile-icon" aria-label="Открыть профиль" title="Профиль">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+            <circle cx="12" cy="8" r="3.25" />
+            <path d="M5 20v-1a7 7 0 0 1 14 0v1" strokeLinecap="round" />
+          </svg>
+      </NavLink>
+      </div>
     </header>
     <div className="shell">
       <nav aria-label="Рабочая область">
         <NavLink to="/" end>Обзор</NavLink>
         <NavLink to="/checklist">Чек-лист</NavLink>
         <NavLink to="/assistant">AI Buddy</NavLink>
-        <NavLink to="/requests">Мои заявки</NavLink>
+        <NavLink to="/requests">{current?.role === 'mentor' ? 'Заявки стажёров' : 'Мои заявки'}</NavLink>
         <NavLink to="/knowledge">База знаний</NavLink>
       </nav>
       <main>
         {session.isPending && <p role="status">Загружаем профили…</p>}
         {session.error && <ErrorNotice error={session.error} retry={() => void session.refetch()} />}
-        {current && <Workspace key={current.token} token={current.token} />}
+        <Routes>
+          <Route path="/profile" element={<section className="panel profile-page">
+          <h1>Профиль</h1>
+          {current && <p>{current.name}, {roles[current.role] ?? current.role}</p>}
+          <label htmlFor="identity">Демо-профиль <select id="identity" disabled={!users.length} value={current?.token ?? ''} onChange={event => {
+            if (current) client.removeQueries({ predicate: query => query.queryKey.includes(current.token) })
+            sessionStorage.setItem('buddy-profile', event.target.value)
+            setPreferred(event.target.value)
+          }}>
+            {!users.length && <option value="">Загрузка…</option>}
+            {users.map(user => <option key={user.token} value={user.token}>{user.name}, {roles[user.role] ?? user.role}</option>)}
+          </select></label>
+          <section className="profile-section" aria-labelledby="profile-login">
+            <h2 id="profile-login">Способы входа</h2>
+            <div className="profile-provider"><span>Госуслуги</span><span>Не подключено</span></div>
+            <div className="profile-provider"><span>Корпоративный аккаунт</span><span>Не подключено</span></div>
+          </section>
+          <div className="profile-section">
+          <label>Тема <select value={theme} onChange={event => setTheme(event.target.value)}>
+            <option value="system">Системная</option>
+            <option value="light">Светлая</option>
+            <option value="dark">Тёмная</option>
+          </select></label>
+          </div>
+        </section>} />
+          <Route path="*" element={current && <Workspace key={current.token} token={current.token} />} />
+        </Routes>
         <footer>Демонстрационный прототип. Инструкции и сервис заявок учебные.</footer>
       </main>
     </div>

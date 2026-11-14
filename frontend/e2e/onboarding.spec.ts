@@ -12,7 +12,9 @@ test('стажёр проходит путь от задачи до сохран
   expect(otherIntern).toBeDefined()
 
   await page.goto('/')
+  await page.getByRole('link', { name: 'Открыть профиль' }).click()
   await page.locator('#identity').selectOption(intern.token)
+  await page.getByRole('link', { name: 'Обзор', exact: true }).click()
   const help = page.getByRole('link', { name: 'Получить помощь' }).first()
   await expect(help).toBeVisible()
   await page.screenshot({ path: info.outputPath('dashboard-desktop.png'), fullPage: true })
@@ -73,13 +75,13 @@ test('стажёр проходит путь от задачи до сохран
   await expect(page.getByText('Доступ выдан', { exact: true })).toBeVisible()
   await page.getByRole('link', { name: 'Обзор', exact: true }).click()
   await page.reload()
-  await expect(page.getByText('Можно начать · доступ выдан')).toBeVisible()
+  await expect(page.getByText('Можно начать, доступ выдан')).toBeVisible()
 })
 
 test('панель на мобильном экране не выходит за границы окна', async ({ page }, info) => {
   await page.setViewportSize({ width: 375, height: 812 })
   await page.goto('/')
-  await expect(page.getByRole('link', { name: 'Получить помощь' }).first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Первая рабочая задача' })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375)
   await page.screenshot({ path: info.outputPath('dashboard-mobile.png'), fullPage: true })
 })
