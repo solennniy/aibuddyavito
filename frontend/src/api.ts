@@ -28,6 +28,8 @@ export interface ChatAnswer {
   sources: Pick<Document, 'id' | 'title'>[]
   mode: string
   action: { resource: 'team_workspace' } | null
+  task_id?: string | null
+  complete_task?: Pick<Task, 'id' | 'title'> | null
 }
 export interface AccessRequest {
   intern_name?: string

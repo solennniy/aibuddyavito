@@ -32,12 +32,22 @@ function fixture(path = '/') {
     if (url === '/api/session') return Response.json({ users: people })
     if (url === '/api/me') return Response.json(person)
     if (url === '/api/tasks') return Response.json({ tasks: person?.role === 'intern' ? tasks : [] })
-    if (url === '/api/tasks/t1') {
+    if (url === '/api/tasks/t1' || url === '/api/tasks/t1?include_next=true') {
       tasks[0] = { ...tasks[0], status: payload.status }
-      return Response.json(tasks[0])
+      return Response.json({ ...tasks[0], next_task: tasks[1] })
     }
     if (url === '/api/knowledge') return Response.json({ documents: person?.role === 'intern' ? [{ id: 'kb', title: 'Учебная инструкция', content: 'Запросите доступ.', source_type: 'synthetic' }] : [] })
-    if (url === '/api/chat') return Response.json({ answer: 'Подготовьте заявку.', sources: [{ id: 'kb', title: 'Учебная инструкция' }], mode: 'demo', action: { resource: 'team_workspace' } })
+    if (url === '/api/chat') {
+      if (payload.message === 'Как прочитать введение?') return Response.json({
+        answer: 'Начните с материалов команды.', sources: [], mode: 'demo', action: null, task_id: 't1',
+      })
+      if (payload.task_id === 't1') return Response.json({
+        answer: 'Отметить задачу как выполненную?', sources: [], mode: 'demo', action: null,
+        complete_task: { id: 't1', title: tasks[0].title },
+      })
+      return Response.json({ answer: 'Подготовьте заявку.', sources: [{ id: 'kb', title: 'Учебная инструкция' }], mode: 'demo', action: { resource: 'team_workspace' } })
+    }
+    if (url === '/api/mentor/messages') return Response.json({ messages: [] })
     if (url === '/api/requests' && method === 'POST') {
       request = { id: 'req', resource: payload.resource, reason: payload.reason, status: 'draft', ticket_id: null, next_step: 'Проверьте заявку.' }
       return Response.json({ request })
@@ -68,11 +78,29 @@ beforeEach(() => sessionStorage.clear())
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('AI Buddy workspace', () => {
+  it('saves checklist progress from chat after clicking confirmation', async () => {
+    const { mock } = fixture('/checklist')
+    const task = await screen.findByRole('checkbox', { name: 'Прочитать введение' })
+    expect(screen.queryAllByRole('button', { name: /Спросить AI Buddy/ })).toHaveLength(0)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Сообщения' }).at(-1)!)
+    fill('Ваш вопрос', 'Как прочитать введение?')
+    click('Отправить')
+    await screen.findByText('Начните с материалов команды.')
+    fill('Ваш вопрос', 'Я сделала')
+    click('Отправить')
+    await screen.findByRole('button', { name: 'Подтвердить выполнение' })
+    expect(mock.mock.calls.some(([, options]) => options.method === 'PATCH')).toBe(false)
+    click('Подтвердить выполнение')
+    await screen.findByText(/Следующий шаг: «Согласовать цели»/)
+    await waitFor(() => expect((task as HTMLInputElement).checked).toBe(true))
+    expect(screen.queryByRole('button', { name: 'Подтвердить выполнение' })).toBeNull()
+  })
+
   it('navigates from onboarding to an explicitly confirmed request and hides it when changing identities', async () => {
     const { fail, mock } = fixture()
     await screen.findByRole('heading', { name: 'Здравствуйте, Анна' })
-    fireEvent.click(screen.getByRole('link', { name: 'Получить помощь' }))
-    expect((screen.getByLabelText('Ваш вопрос') as HTMLTextAreaElement).value).toContain('пространству команды')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Сообщения' }).at(-1)!)
+    fill('Ваш вопрос', 'Как получить доступ к пространству команды?')
     fail.set('POST /api/chat', Response.json({ detail: 'Чат временно недоступен' }, { status: 503 }))
     click('Отправить')
     await screen.findByRole('alert')

@@ -14,3 +14,7 @@ coverage.xml
 *.xlsx
 *.sqlite3
 data
+external-repositories
+.taste-skill
+.env.*
+!.env.example

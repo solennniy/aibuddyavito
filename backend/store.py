@@ -40,3 +40,12 @@ class MockTicket(Base):
 
     request_id: Mapped[str] = mapped_column(ForeignKey("access_requests.id"), primary_key=True)
     ticket_id: Mapped[str] = mapped_column(String(45), unique=True)
+
+
+class MentorMessage(Base):
+    __tablename__ = "mentor_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(40), index=True)
+    message: Mapped[str] = mapped_column(String(2000))
+    created_at: Mapped[str] = mapped_column(default=now)

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useSearchParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type AccessRequest, type ChatAnswer, type DemoUser, type Document, type Task, type User } from './api'
+import avitoLogo from './assets/avito-logo.webp?url'
 
 const periods: Record<string, string> = {
   week_1: 'Первая неделя', week_2: 'Вторая неделя', month_1: 'Первый месяц',
@@ -13,18 +14,26 @@ const statuses: Record<string, string> = {
   approved: 'Согласована', rejected: 'Отклонена', failed: 'Ошибка обработки',
 }
 const roles: Record<string, string> = { intern: 'Стажёр', mentor: 'Наставник', admin: 'Администратор' }
-const help = '/assistant?question=' + encodeURIComponent('Как получить доступ к пространству команды?')
+const taskFollowUp = /^(с чего начать|что (конкретно|именно|нужно)|как (это|ее|её|его)|я (сделал[аи]?|завершил[аи]?|выполнил[аи]?)[.!]?\s*$|готово[.!]?\s*$)/i
 type ChatEntry = { question: string; result: ChatAnswer }
-type FirstTask = { title: string; state: 'blocked' | 'waiting' | 'ready'; reason: string; alternative: string | null }
+type FirstTask = { title: string; state: 'blocked' | 'waiting' | 'ready'; alternative: string | null }
+
+function ChatIcon() {
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l1.7-3.2a7.5 7.5 0 0 1 5.8-11.8h.1A7.5 7.5 0 0 1 20 11.5Z"/><path d="M9 10h7m-7 3h5"/></svg>
+}
+
+function Chevron({ down = false }: { down?: boolean }) {
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={down ? 'm6 9 6 6 6-6' : 'm6 15 6-6 6 6'}/></svg>
+}
 
 function ErrorNotice({ error, retry }: { error: Error; retry?: () => void }) {
   return <div className="error" role="alert">{error.message}{retry && <button className="quiet" onClick={retry}>Повторить</button>}</div>
 }
 
-function RequestHistory({ requests }: { requests: AccessRequest[] }) {
+function RequestHistory({ requests, actions }: { requests: AccessRequest[]; actions?: (request: AccessRequest) => React.ReactNode }) {
   return requests.length ? <ul className="rows">{requests.map(request =>
     <li key={request.id} className="row">
-      <div><strong>{request.ticket_id ?? 'Заявка на доступ'}</strong>{request.intern_name && <p>Стажёр: {request.intern_name}</p>}<p>{request.reason}</p><p>{request.next_step}</p></div>
+      <div><strong>{request.ticket_id ?? 'Заявка на доступ'}</strong>{request.intern_name && <p>Стажёр: {request.intern_name}</p>}<p>{request.reason}</p>{!request.intern_name && <p>{request.next_step}</p>}{actions?.(request)}</div>
       <span className="status" data-status={request.status}>{statuses[request.status] ?? request.status}</span>
     </li>)}</ul> : <p className="muted">Заявок пока нет.</p>
 }
@@ -37,9 +46,13 @@ function Dashboard({ user, tasks, requests, firstTask }: { user: User; tasks: Ta
     <header className="intro"><h1>Здравствуйте, {user.name}</h1><p>Ваш план адаптации и заявки в пространство команды</p></header>
     <div className="dashboard">
       <section className="panel timeline">
-        <h2>Маршрут адаптации</h2>
-        <p className="metric">{completed} <span>из {tasks.length} задач выполнено</span></p>
-        <progress aria-label="Прогресс адаптации" value={completed} max={tasks.length || 1} />
+        <h2>{user.role === 'mentor' ? 'Задачи наставника' : 'Прогресс адаптации'}</h2>
+        <div className="progress-caption">
+          <p className="metric">{completed} <span>из {tasks.length} задач выполнено</span></p>
+          <strong>{tasks.length ? Math.round(completed / tasks.length * 100) : 0}%</strong>
+        </div>
+        <progress aria-label="Прогресс адаптации" aria-valuetext={`${completed} из ${tasks.length} задач выполнено`} value={completed} max={tasks.length || 1} />
+        <p className="progress-note">Полоса показывает долю задач, отмеченных выполненными в чек-листе.</p>
         <ol className="periods">{Object.entries(periods).map(([key, title]) =>
           <li key={key} aria-current={upcoming[0]?.period === key ? 'step' : undefined}>{title}</li>
         )}</ol>
@@ -53,7 +66,6 @@ function Dashboard({ user, tasks, requests, firstTask }: { user: User; tasks: Ta
             <Link to="/requests">Проверить заявку</Link>
           </> : <>
             <p>Мешает начать: нужен доступ к пространству команды.</p>
-            <Link className="button" to={help + (firstTask ? '&reason=' + encodeURIComponent(firstTask.reason) : '')}>Получить помощь</Link>
           </>}
       </section>}
       <section className="panel">
@@ -84,7 +96,6 @@ function Checklist({ tasks, token }: { tasks: Task[]; token: string }) {
         <div>
           <label className="task"><input type="checkbox" checked={task.status === 'completed'} disabled={change.isPending || task.status === 'blocked'} onChange={() => change.mutate(task)} />{task.title}</label>
           <p>{task.description}</p>
-          {task.id === 'task-access-workspace' && <p><Link to={help}>Получить помощь</Link></p>}
           {task.document_ids.map(id => <p key={id}><Link to={'/knowledge#' + id}>Открыть инструкцию</Link></p>)}
           {task.request_ids.length > 0 && <Link to="/requests">Связанные заявки ({task.request_ids.length})</Link>}
         </div>
@@ -94,44 +105,77 @@ function Checklist({ tasks, token }: { tasks: Task[]; token: string }) {
   </>
 }
 
-function Assistant({ token, canRequest, history, addEntry }: {
+function Assistant({ token, canRequest, history, addEntry, onClose }: {
   token: string
   canRequest: boolean
   history: ChatEntry[]
   addEntry: (entry: ChatEntry) => void
+  onClose: () => void
 }) {
-  const [params] = useSearchParams()
-  const [question, setQuestion] = useState(params.get('question') ?? '')
+  const client = useQueryClient()
+  const [question, setQuestion] = useState('')
+  const [mentorQuestion, setMentorQuestion] = useState('')
+  const mentor = useMutation({
+    mutationFn: (message: string) => api<{ id: string }>('/mentor/messages', token, { message }),
+    onSuccess: () => setMentorQuestion(''),
+  })
   const send = useMutation({
-    mutationFn: (message: string) => api<ChatAnswer>('/chat', token, { message }),
+    mutationFn: (message: string) => api<ChatAnswer>('/chat', token, {
+      message,
+      previous_question: history.findLast(entry => entry.question)?.question ?? '',
+      task_id: taskFollowUp.test(message) ? history.at(-1)?.result.task_id ?? undefined : undefined,
+    }),
     onSuccess: (result, message) => { addEntry({ question: message, result }); setQuestion('') },
+  })
+  const complete = useMutation({
+    mutationFn: (id: string) => api<Task & { next_task: Pick<Task, 'id' | 'title' | 'description'> | null }>(
+      '/tasks/' + encodeURIComponent(id) + '?include_next=true', token, { status: 'completed' }, 'PATCH',
+    ),
+    onSuccess: ({ title, next_task }) => {
+      addEntry({ question: '', result: {
+        answer: `«${title}» отмечена в чек-листе. ` + (next_task
+          ? `Следующий шаг: «${next_task.title}». ${next_task.description}`
+          : 'Все задачи в вашем чек-листе выполнены.'),
+        sources: [], mode: 'demo', action: null, task_id: next_task?.id,
+      } })
+      void client.invalidateQueries({ queryKey: ['tasks', token] })
+    },
   })
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (question.trim()) send.mutate(question.trim())
+    if (question.trim() && !send.isPending && !complete.isPending) {
+      complete.reset()
+      send.mutate(question.trim())
+    }
   }
   return <>
-    <header className="intro"><h1>AI Buddy</h1><p>Ответы по доступным учебным инструкциям</p></header>
+    <header className="chat-heading"><h2>Сообщения</h2><button type="button" className="chat-close" aria-label="Свернуть сообщения" onClick={onClose}><Chevron down /></button></header>
     <div className="assistant-layout">
       <section className="panel conversation">
         <div className="messages" aria-live="polite">
-          <p className="intro-message">Спросите, как пройти этап адаптации или запросить доступ к пространству команды.</p>
+          <p className="chat-participant"><strong>AI Buddy</strong></p>
+          <p className="intro-message">{canRequest ? 'Спросите про задачу или напишите, что уже сделали.' : 'Спросите про этапы адаптации или откройте обращения стажёров.'}</p>
+          {!canRequest && <Link to="/requests#mentor-messages" onClick={onClose}>Открыть обращения стажёров</Link>}
           {history.map(({ question: asked, result }, index) => <article key={index}>
-            <p className="asked">{asked}</p><div className="reply"><strong>AI Buddy</strong><p>{result.answer}</p>
-            {result.sources.length > 0 && <details className="sources"><summary>Источники</summary><ul>{result.sources.map(source => <li key={source.id}><Link to={'/knowledge#' + source.id}>{source.title}</Link></li>)}</ul></details>}
-            {result.action && <Link className="button secondary" to={params.has('reason') ? '/requests?' + new URLSearchParams({ reason: params.get('reason')! }) : '/requests'}>Создать заявку</Link>}
+            {asked && <p className="asked">{asked}</p>}<div className="reply"><strong>AI Buddy</strong><p>{result.answer}</p>
+            {result.sources.length > 0 && <details className="sources"><summary>Источники</summary><ul>{result.sources.map(source => <li key={source.id}><Link to={'/knowledge#' + source.id} onClick={onClose}>{source.title}</Link></li>)}</ul></details>}
+            {result.action && <Link className="button secondary" to="/requests" onClick={onClose}>Создать заявку</Link>}
+            {result.complete_task && index === history.length - 1 && <button type="button" disabled={complete.isPending || send.isPending} onClick={() => complete.mutate(result.complete_task!.id)}>
+              {complete.isPending ? 'Сохраняем…' : 'Подтвердить выполнение'}
+            </button>}
             </div>
           </article>)}
         </div>
         {send.isPending && <p role="status">Ищем ответ…</p>}
         {send.error && <ErrorNotice error={send.error} retry={() => send.mutate(send.variables!)} />}
+        {complete.error && <ErrorNotice error={complete.error} />}
         <form className="composer" onSubmit={submit}>
           <label htmlFor="question">Ваш вопрос</label>
-          <textarea id="question" value={question} onChange={event => setQuestion(event.target.value)} maxLength={2000} required placeholder="Как запросить доступ к пространству команды?" />
-          <button type="submit" disabled={send.isPending}>Отправить</button>
+          <textarea id="question" value={question} onChange={event => setQuestion(event.target.value)} maxLength={2000} required placeholder="Напишите сообщение" />
+          <button type="submit" disabled={send.isPending || complete.isPending}>Отправить</button>
         </form>
       </section>
-      {canRequest && <aside className="panel next-step"><h2>Следующий шаг</h2><p>Для первой задачи можно запросить доступ к пространству вашей команды.</p><Link to="/requests">Перейти к заявке</Link></aside>}
+      {canRequest && <details className="mentor-help"><summary>Написать наставнику</summary><form className="composer" onSubmit={event => { event.preventDefault(); if (mentorQuestion.trim()) mentor.mutate(mentorQuestion.trim()) }}><label htmlFor="mentor-question">Вопрос наставнику</label><textarea id="mentor-question" value={mentorQuestion} onChange={event => setMentorQuestion(event.target.value)} maxLength={2000} required /><button disabled={mentor.isPending}>Отправить наставнику</button></form>{mentor.isSuccess && <p role="status">Обращение отправлено наставнику в демоверсии.</p>}{mentor.error && <ErrorNotice error={mentor.error} />}</details>}
     </div>
   </>
 }
@@ -141,7 +185,20 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
   const [params] = useSearchParams()
   const [reason, setReason] = useState(() => (params.get('reason') ?? '').slice(0, 500))
   const [selected, setSelected] = useState<AccessRequest | null>(null)
+  const mentorMessages = useQuery({
+    queryKey: ['mentor-messages', token],
+    queryFn: () => api<{ messages: { id: string; intern_name: string; message: string }[] }>('/mentor/messages', token),
+    enabled: user.role === 'mentor',
+    refetchInterval: 5000,
+  })
   const updateHistory = () => client.invalidateQueries({ queryKey: ['requests'] })
+  const review = useMutation({
+    mutationFn: ({ id, decision }: { id: string; decision: 'approved' | 'rejected' }) =>
+      api<{ request: AccessRequest }>('/requests/' + encodeURIComponent(id) + '/review', token, { decision }),
+    onSettled: async () => {
+      await Promise.all([updateHistory(), client.invalidateQueries({ queryKey: ['tasks'] })])
+    },
+  })
   const prepare = useMutation({
     mutationFn: ({ reason, key }: { reason: string; key: string }) =>
       api<{ request: AccessRequest }>('/requests', token, { resource: 'team_workspace', reason }, 'POST', key),
@@ -160,6 +217,7 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
   return <>
     <header className="intro"><h1>{user.role === 'mentor' ? 'Заявки стажёров' : 'Мои заявки'}</h1><p>{user.role === 'mentor' ? 'Отправленные заявки закреплённых за вами стажёров' : 'Заявки отправляются в учебный сервис'}</p></header>
     <div className="dashboard">
+      {user.role === 'mentor' && <section className="panel" id="mentor-messages"><h2>Обращения стажёров</h2>{mentorMessages.isPending && <p>Загружаем обращения…</p>}{mentorMessages.error && <ErrorNotice error={mentorMessages.error} retry={() => void mentorMessages.refetch()} />}{mentorMessages.data?.messages.length === 0 && <p className="muted">Обращений пока нет.</p>}<ul className="rows">{mentorMessages.data?.messages.map(message => <li className="row" key={message.id}><div><strong>{message.intern_name}</strong><p>{message.message}</p></div></li>)}</ul></section>}
       <section className="panel">
         <h2>Доступ к пространству команды</h2>
         {user.role === 'intern' ? <>
@@ -189,10 +247,19 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
         </> : <p className="muted">Создание заявок доступно стажёрам.</p>}
       </section>
       <section className="panel">
-        <h2>История заявок</h2><RequestHistory requests={requests} />
-        {user.role === 'intern' && requests.filter(request => request.status === 'submitted').map(request =>
-          <button className="quiet" key={request.id} disabled={pending} onClick={() => grant.mutate(request.id)}>Демо: подтвердить выдачу доступа</button>
-        )}
+        <h2>История заявок</h2>
+        {review.error && <ErrorNotice error={review.error} />}
+        <RequestHistory requests={requests} actions={request => {
+          if (user.role === 'mentor' && ['submitted', 'in_review'].includes(request.status)) {
+            return <div className="request-actions">
+              <button type="button" disabled={review.isPending} onClick={() => review.mutate({ id: request.id, decision: 'approved' })}>Согласовать</button>
+              <button type="button" className="secondary" disabled={review.isPending} onClick={() => review.mutate({ id: request.id, decision: 'rejected' })}>Отклонить</button>
+            </div>
+          }
+          if (user.role === 'intern' && request.status === 'approved') {
+            return <button type="button" className="quiet" disabled={pending} onClick={() => grant.mutate(request.id)}>Демо: подтвердить выдачу доступа</button>
+          }
+        }} />
         {grant.error && <ErrorNotice error={grant.error} />}
         {user.role === 'intern' && requests.filter(request => ['draft', 'failed'].includes(request.status)).map(request =>
           <button className="quiet" key={request.id} onClick={() => { confirm.reset(); setSelected(request) }}>Открыть черновик: {request.reason}</button>
@@ -232,14 +299,13 @@ function Knowledge({ token }: { token: string }) {
 }
 
 function Workspace({ token }: { token: string }) {
-  const [history, setHistory] = useState<ChatEntry[]>([])
   const profile = useQuery({ queryKey: ['profile', token], queryFn: () => api<User>('/me', token) })
-  const tasks = useQuery({ queryKey: ['tasks', token], queryFn: () => api<{ tasks: Task[]; first_task?: FirstTask | null }>('/tasks', token) })
+  const tasks = useQuery({ queryKey: ['tasks', token], queryFn: () => api<{ tasks: Task[]; first_task?: FirstTask | null }>('/tasks', token), refetchInterval: 5000 })
   const requests = useQuery({
     queryKey: ['requests', token],
     queryFn: () => api<{ requests: AccessRequest[] }>('/requests', token),
     refetchOnMount: 'always',
-    refetchInterval: profile.data?.role === 'mentor' ? 5000 : false,
+    refetchInterval: 5000,
   })
   const errors = [profile, tasks, requests].filter(result => result.error)
   if (errors.length) return <ErrorNotice error={errors[0].error!} retry={() => errors.forEach(result => void result.refetch())} />
@@ -247,7 +313,6 @@ function Workspace({ token }: { token: string }) {
   return <Routes>
     <Route path="/" element={<Dashboard user={profile.data} tasks={tasks.data.tasks} requests={requests.data.requests} firstTask={tasks.data.first_task} />} />
     <Route path="/checklist" element={<Checklist tasks={tasks.data.tasks} token={token} />} />
-    <Route path="/assistant" element={<Assistant token={token} canRequest={profile.data.role === 'intern'} history={history} addEntry={entry => setHistory(old => [...old, entry])} />} />
     <Route path="/requests" element={<Requests token={token} user={profile.data} requests={requests.data.requests} />} />
     <Route path="/knowledge" element={<Knowledge token={token} />} />
     <Route path="*" element={<Navigate to="/" replace />} />
@@ -258,6 +323,8 @@ export function App() {
   const session = useQuery({ queryKey: ['session'], queryFn: () => api<{ users: DemoUser[] }>('/session') })
   const client = useQueryClient()
   const [preferred, setPreferred] = useState(() => sessionStorage.getItem('buddy-profile') ?? '')
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatHistory, setChatHistory] = useState<ChatEntry[]>([])
   const [theme, setTheme] = useState(() => localStorage.getItem('buddy-theme') ?? 'system')
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -267,8 +334,9 @@ export function App() {
   const current = users.find(user => user.token === preferred) ?? users[0]
   return <>
     <header className="topbar">
-      <Link to="/" className="brand"><span className="mark" aria-hidden="true"><i /><i /><i /><i /></span>AI Buddy</Link>
+      <Link to="/" className="brand"><span className="brand-logo"><img src={avitoLogo} alt="Авито" /><img className="brand-logo-inverse" src={avitoLogo} alt="" aria-hidden="true" /></span><span>AI Buddy</span></Link>
       <div className="topbar-controls">
+      {current && <button type="button" className="messages-icon" aria-label="Сообщения" aria-expanded={chatOpen} aria-controls="buddy-messages" onClick={() => setChatOpen(open => !open)}><ChatIcon /></button>}
       <NavLink to="/profile" className="profile-icon" aria-label="Открыть профиль" title="Профиль">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
             <circle cx="12" cy="8" r="3.25" />
@@ -281,7 +349,6 @@ export function App() {
       <nav aria-label="Рабочая область">
         <NavLink to="/" end>Обзор</NavLink>
         <NavLink to="/checklist">Чек-лист</NavLink>
-        <NavLink to="/assistant">AI Buddy</NavLink>
         <NavLink to="/requests">{current?.role === 'mentor' ? 'Заявки стажёров' : 'Мои заявки'}</NavLink>
         <NavLink to="/knowledge">База знаний</NavLink>
       </nav>
@@ -294,6 +361,8 @@ export function App() {
           {current && <p>{current.name}, {roles[current.role] ?? current.role}</p>}
           <label htmlFor="identity">Демо-профиль <select id="identity" disabled={!users.length} value={current?.token ?? ''} onChange={event => {
             if (current) client.removeQueries({ predicate: query => query.queryKey.includes(current.token) })
+            setChatHistory([])
+            setChatOpen(false)
             sessionStorage.setItem('buddy-profile', event.target.value)
             setPreferred(event.target.value)
           }}>
@@ -318,5 +387,7 @@ export function App() {
         <footer>Демонстрационный прототип. Инструкции и сервис заявок учебные.</footer>
       </main>
     </div>
+    {current && !chatOpen && <button type="button" className="chat-launcher" aria-expanded={false} aria-controls="buddy-messages" onClick={() => setChatOpen(true)}>Сообщения<Chevron /></button>}
+    {current && chatOpen && <aside id="buddy-messages" className="chat-widget" aria-label="Чат AI Buddy"><Assistant token={current.token} canRequest={current.role === 'intern'} history={chatHistory} addEntry={entry => setChatHistory(old => [...old, entry])} onClose={() => setChatOpen(false)} /></aside>}
   </>
 }

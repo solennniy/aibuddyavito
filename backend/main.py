@@ -14,8 +14,9 @@ from sqlalchemy import URL, create_engine, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from .assistant import ModelUnavailable, answer_question, visible_documents
-from .store import AccessRequest, Base, MockTicket, TaskProgress, now
+from .assistant import ModelUnavailable, answer_question, context_intent, visible_documents
+from .store import AccessRequest, Base, MentorMessage, MockTicket, TaskProgress, now
+from .task_chat import checklist_answer, next_checklist_task
 
 
 def demo_user(id, name, role):
@@ -43,6 +44,11 @@ class Message(Input):
     message: Annotated[str, Field(min_length=1, max_length=2000)]
 
 
+class ChatMessage(Message):
+    previous_question: Annotated[str, Field(max_length=2000)] = ""
+    task_id: Annotated[str | None, Field(max_length=64)] = None
+
+
 class Draft(Input):
     resource: Literal["team_workspace"]
     reason: Annotated[str, Field(min_length=1, max_length=1000)]
@@ -61,6 +67,10 @@ class Confirmation(Input):
 
 class Progress(Input):
     status: Literal["todo", "in_progress", "completed"]
+
+
+class Review(Input):
+    decision: Literal["approved", "rejected"]
 
 
 def current_user(authorization: Annotated[str | None, Header()] = None):
@@ -105,10 +115,10 @@ def serialize_request(row, ticket=None):
     hints = {
         "draft": "Проверьте данные и подтвердите отправку.",
         "failed": "Повторите отправку этой заявки.",
-        "submitted": "Дождитесь ответа учебного сервиса. Доступ ещё не выдан.",
+        "submitted": "Дождитесь решения наставника.",
         "in_review": "Дождитесь завершения рассмотрения.",
         "approved": "Дождитесь фактической выдачи доступа.",
-        "rejected": "Обратитесь к наставнику.",
+        "rejected": "Уточните у наставника, что нужно изменить, и отправьте новую заявку.",
         "completed": "Проверьте доступ к пространству команды.",
     }
     return {"id": row.id, "resource": row.resource, "reason": row.reason, "status": row.status,
@@ -157,7 +167,7 @@ def create_app(database_path=None):
                 AccessRequest.owner == user["id"], AccessRequest.resource == "team_workspace"
             )))
             state = ("ready" if "completed" in access_states else
-                     "waiting" if "submitted" in access_states else "blocked")
+                     "waiting" if access_states.intersection({"submitted", "in_review", "approved"}) else "blocked")
             alternative = next((item for item in items if item["id"] != "task-access-workspace"
                                 and item["status"] in {"todo", "in_progress"}), None)
             return {"tasks": items, "first_task": {
@@ -168,7 +178,7 @@ def create_app(database_path=None):
             }}
 
     @app.patch("/api/tasks/{task_id}")
-    def patch_task(task_id: str, change: Progress, user: User):
+    def patch_task(task_id: str, change: Progress, user: User, include_next: bool = False):
         task = owned_task(task_id, user)
         with Session(engine) as db:
             db.execute(text("BEGIN IMMEDIATE"))
@@ -181,6 +191,14 @@ def create_app(database_path=None):
                 progress.completed_at = now() if change.status == "completed" else None
             db.flush()
             payload = task_state(task, user, db)
+            if include_next:
+                upcoming = next_checklist_task(
+                    task_state(candidate, user, db) for candidate in CHECKLIST.values()
+                    if candidate["assigned_role"] == user["role"]
+                )
+                payload["next_task"] = (
+                    {key: upcoming[key] for key in ("id", "title", "description")} if upcoming else None
+                )
             db.commit()
         return payload
 
@@ -189,9 +207,53 @@ def create_app(database_path=None):
         return {"documents": visible_documents(user["role"])}
 
     @app.post("/api/chat")
-    def chat(body: Message, user: User):
+    def chat(body: ChatMessage, user: User):
+        if body.task_id:
+            owned_task(body.task_id, user)
+        topic = context_intent(body.message, body.previous_question)
+        if body.task_id and body.message.casefold().strip(" .?!") in {"с чего начать", "что делать сейчас"}:
+            topic = None
+        if topic != "request-status":
+            with Session(engine) as db:
+                items = [task_state(task, user, db) for task in CHECKLIST.values()
+                         if task["assigned_role"] == user["role"]]
+            checklist = checklist_answer(
+                body.message, items, user["role"], body.task_id, next_step=topic == "next-task",
+            )
+            if checklist:
+                return checklist
+        if topic == "request-status":
+            entries = requests(user)["requests"]
+            if user["role"] == "mentor":
+                count = sum(entry["status"] in {"submitted", "in_review"} for entry in entries)
+                answer = f"Заявок на рассмотрении: {count}. Откройте «Заявки стажёров», чтобы согласовать или отклонить заявку."
+            elif entries:
+                latest = entries[0]
+                labels = {"draft": "черновик", "failed": "ошибка отправки", "submitted": "ожидает решения наставника",
+                          "in_review": "на рассмотрении", "approved": "согласована", "rejected": "отклонена",
+                          "completed": "доступ выдан"}
+                number = f" {latest['ticket_id']}" if latest["ticket_id"] else ""
+                answer = f"Последняя заявка{number}: {labels[latest['status']]}. {latest['next_step']}"
+            else:
+                answer = "У вас пока нет заявок на доступ. Откройте «Мои заявки», чтобы подготовить черновик."
+        elif topic == "next-task":
+            context = tasks(user)
+            first = context["first_task"]
+            if first and first["state"] == "ready":
+                answer = f"Доступ выдан. Можно начать первую рабочую задачу: «{first['title']}»."
+            elif first and first["state"] == "waiting":
+                answer = "Первая рабочая задача ждёт выдачи доступа. Проверьте статус в «Моих заявках»."
+                if first["alternative"]:
+                    answer += f" Пока ждёте, откройте в чек-листе «{first['alternative']}»."
+            else:
+                upcoming = next_checklist_task(context["tasks"])
+                answer = (f"Следующий шаг в чек-листе: «{upcoming['title']}». {upcoming['description']}"
+                          if upcoming else "В чек-листе сейчас нет незавершённых задач.")
+        if topic:
+            return {"answer": answer, "sources": [], "mode": "demo", "action": None,
+                    "complete_task": None}
         try:
-            return answer_question(body.message, user["role"])
+            return answer_question(body.message, user["role"], body.previous_question)
         except ModelUnavailable as exc:
             raise HTTPException(503, "Не удалось получить ответ модели. Повторите попытку.") from exc
 
@@ -208,6 +270,28 @@ def create_app(database_path=None):
                 {**serialize_request(row, ticket), **({"intern_name": assigned[row.owner]} if assigned else {})}
                 for row, ticket in rows
             ]}
+
+    @app.post("/api/mentor/messages", status_code=201)
+    def send_mentor_message(body: Message, user: User):
+        require_intern(user)
+        with Session(engine) as db:
+            message = MentorMessage(id=str(uuid4()), owner=user["id"], message=body.message)
+            db.add(message)
+            db.commit()
+            return {"id": message.id, "status": "sent"}
+
+    @app.get("/api/mentor/messages")
+    def mentor_messages(user: User):
+        if user["role"] != "mentor":
+            raise HTTPException(403, "Доступно наставнику.")
+        assigned = MENTOR_INTERNS.get(user["id"], {})
+        with Session(engine) as db:
+            messages = db.scalars(select(MentorMessage).where(
+                MentorMessage.owner.in_(assigned)
+            ).order_by(MentorMessage.created_at.desc()))
+            return {"messages": [{"id": item.id, "intern_name": assigned[item.owner],
+                                  "message": item.message, "created_at": item.created_at}
+                                 for item in messages]}
 
     @app.post("/api/requests", status_code=201)
     def create_draft(
@@ -260,6 +344,26 @@ def create_app(database_path=None):
             db.commit()
         return {"request": payload}
 
+    @app.post("/api/requests/{request_id}/review")
+    def review_request(request_id: str, review: Review, user: User):
+        if user["role"] != "mentor":
+            raise HTTPException(403, "Рассмотрение заявок доступно наставнику.")
+        assigned = MENTOR_INTERNS.get(user["id"], {})
+        with Session(engine) as db:
+            db.execute(text("BEGIN IMMEDIATE"))
+            row = db.scalar(select(AccessRequest).where(
+                AccessRequest.id == request_id, AccessRequest.owner.in_(assigned)
+            ))
+            ticket = db.get(MockTicket, request_id)
+            if row is None or ticket is None:
+                raise HTTPException(404, "Заявка не найдена.")
+            if row.status not in {"submitted", "in_review", review.decision}:
+                raise HTTPException(409, "Заявка уже рассмотрена.")
+            row.status = review.decision
+            payload = serialize_request(row, ticket)
+            db.commit()
+        return {"request": payload}
+
     @app.post("/api/demo/requests/{request_id}/grant")
     def simulate_grant(request_id: str, confirmation: Confirmation, user: User):
         """Replay a grant from the synthetic service for the user's own ticket."""
@@ -272,8 +376,8 @@ def create_app(database_path=None):
             if row is None:
                 raise HTTPException(404, "Заявка не найдена.")
             ticket = db.get(MockTicket, row.id)
-            if ticket is None or row.status not in {"submitted", "completed"}:
-                raise HTTPException(409, "Сначала отправьте заявку в учебный сервис.")
+            if ticket is None or row.status not in {"approved", "completed"}:
+                raise HTTPException(409, "Сначала заявку должен согласовать наставник.")
             row.status = "completed"
             payload = serialize_request(row, ticket)
             db.commit()
