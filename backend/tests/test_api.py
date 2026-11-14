@@ -130,7 +130,9 @@ def test_restart_and_duplicate_confirmation(tmp_path):
         assert confirm(client, draft, headers=MENTOR).status_code == 403
         sent = confirm(client, draft).json()["request"]
         assert sent["status"] == "submitted"
-        assert sent["ticket_id"].startswith("DEMO-")
+        # A short human-readable number that is still derived from the request ID.
+        assert sent["ticket_id"] == f"DEMO-{sent['id'][:8].upper()}"
+        assert len(sent["ticket_id"]) == 13
         client.patch(f"/api/tasks/{TASK_ID}", json={"status": "completed"}, headers=ANNA)
     with TestClient(main.create_app(db)) as client:
         assert confirm(client, draft).json()["request"] == sent

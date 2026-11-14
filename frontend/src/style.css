@@ -47,7 +47,7 @@ progress { width: 100%; height: 10px; accent-color: var(--accent); }
 .rows { padding: 0; list-style: none; }
 .row { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
 .row p { font-size: 13px; margin: 5px 0; }
-.status { color: var(--muted); font-size: 12px; max-width: 155px; text-align: right; }
+.status { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
 .status[data-status="completed"], .status[data-status="submitted"] { color: #126642; }
 .status[data-status="failed"], .status[data-status="blocked"] { color: #932d25; }
 .task { display: flex; align-items: center; gap: 9px; cursor: pointer; }
@@ -80,5 +80,7 @@ footer { font-size: 12px; color: var(--muted); padding: 26px 0; }
   main { padding: 18px 14px 0; }
   .dashboard, .assistant-layout { grid-template-columns: 1fr; }
   .panel { padding: 15px; }
+  .row { flex-direction: column; gap: 4px; }
+  .status { text-align: left; }
   h1 { font-size: 24px; }
 }

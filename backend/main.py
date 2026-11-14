@@ -246,7 +246,9 @@ def create_app(database_path=None):
                 raise HTTPException(503, "Учебный сервис временно недоступен. Повторите отправку.")
             # The mock service and request commit atomically. The request ID is
             # the integration's idempotency key and MockTicket's primary key.
-            ticket = MockTicket(request_id=row.id, ticket_id=f"DEMO-{row.id.upper()}")
+            # A short, readable ticket number for the demo. It stays derived from
+            # the request ID, so replaying the confirmation returns the same one.
+            ticket = MockTicket(request_id=row.id, ticket_id=f"DEMO-{row.id[:8].upper()}")
             db.add(ticket)
             row.status = "submitted"
             payload = serialize_request(row, ticket)
