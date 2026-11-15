@@ -254,13 +254,13 @@ nav a svg { flex-shrink: 0; }
 .side-links > a { display: flex; align-items: center; gap: 12px; padding: 8px 3px; color: var(--ink); font-size: 12px; }
 .side-links > a svg, .side-links > a svg:last-child { width: 15px; height: 15px; margin: 0; color: var(--muted); }
 .workspace-page { max-width: 1300px; margin: 0 auto; }
-.page-heading { margin: 6px 0 26px; }
-.page-heading h1 { margin: 9px 0; font-size: clamp(27px, 2.5vw, 34px); letter-spacing: -.6px; }
+.page-heading { margin: 8px 0 24px; }
+.page-heading h1 { margin: 8px 0; font-size: clamp(27px, 2.5vw, 34px); letter-spacing: -.6px; }
 .page-heading p { margin: 0; max-width: 680px; }
 .page-kicker { color: var(--positive); font-size: 12px; font-weight: 600; }
 .workspace-page .panel { border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 3px 12px light-dark(#182b4008, #0002); }
 .workspace-page .panel h2 { font-size: 16px; }
-.page-summary { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.page-summary { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
 .page-summary-icon { flex: 0 0 44px; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; color: var(--positive); background: var(--positive-bg); }
 .page-summary-icon svg { width: 21px; height: 21px; }
 .page-summary > div { flex: 1; }
@@ -268,13 +268,13 @@ nav a svg { flex-shrink: 0; }
 .page-summary progress { max-width: 240px; margin: 0; }
 .page-summary progress::-webkit-progress-value { background: #0caf5c; }
 .page-summary progress::-moz-progress-bar { background: #0caf5c; }
-.checklist-page .panel.stack { padding: 22px 24px; }
+.checklist-page .panel.stack { padding: 24px; }
 .checklist-page .panel.stack h2 { margin-bottom: 16px; }
 .checklist-page .row { padding: 16px 0; }
 .checklist-page .row p { margin: 8px 0 8px 27px; }
 .checklist-page .row a { display: inline-flex; margin: 2px 12px 0 27px; font-size: 13px; }
 .checklist-page .task { font-weight: 500; }
-.card-title { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.card-title { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
 .card-title h2 { margin: 0; }
 .requests-page .dashboard { align-items: start; }
 .requests-page .composer button, .requests-page #confirm, .mentor-page .request-actions button:first-child { background: #0caf5c; color: white; border-radius: 10px; }
@@ -286,11 +286,11 @@ nav a svg { flex-shrink: 0; }
 .knowledge-card p { color: var(--muted); font-size: 14px; line-height: 1.6; }
 .knowledge-tag { align-self: flex-start; color: var(--positive); background: var(--positive-bg); padding: 5px 9px; border-radius: 999px; font-size: 11px; }
 .profile-page { padding: 24px; }
-.profile-identity { display: flex; align-items: center; gap: 14px; padding-bottom: 22px; margin-bottom: 22px; border-bottom: 1px solid var(--border); }
+.profile-identity { display: flex; align-items: center; gap: 16px; padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
 .profile-identity p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 .profile-section h2 { font-size: 15px; }
 .mentor-page .dashboard { align-items: start; }
-@media (max-width: 760px) { .knowledge-grid { grid-template-columns: 1fr; } .page-summary { flex-wrap: wrap; } .page-summary progress { max-width: none; } .checklist-page .panel.stack { padding: 18px; } }
+@media (max-width: 760px) { .knowledge-grid { grid-template-columns: 1fr; } .page-summary { flex-wrap: wrap; } .page-summary progress { max-width: none; } .checklist-page .panel.stack { padding: 16px; } }
 .home-layout.chat-expanded { grid-template-columns: minmax(0, 1fr); }
 .home-layout.chat-expanded .home-side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .home-layout.chat-expanded .home-ask { padding: 20px; }
@@ -348,6 +348,6 @@ nav a svg { flex-shrink: 0; }
   nav a { font-size: 13px; }
   main { padding: var(--space-16) var(--space-16) 64px; }
   .dashboard, .assistant-layout { grid-template-columns: 1fr; }
-  .panel { padding: 15px; }
+  .panel { padding: 16px; }
   h1 { font-size: 24px; }
 }

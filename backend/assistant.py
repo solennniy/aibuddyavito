@@ -334,6 +334,15 @@ def model_answer(message, documents, preferred_id, previous_question):
 
 def answer_question(message, role, previous_question=""):
     question = message.casefold().replace("ё", "е")
+    if re.fullmatch(
+        r"\s*(?:привет|здравствуй(?:те)?|добрый (?:день|вечер)|доброе утро|hello|hi)"
+        r"(?:[,!\s]*(?:ai buddy|бадди))?[!?.\s👋]*", question
+    ):
+        return {
+            "answer": "Привет! Я AI Buddy. Помогу разобраться с адаптацией, найти инструкцию или подготовить заявку на доступ. Что хочешь узнать?",
+            "sources": [], "mode": "demo", "action": None,
+            "complete_task": None, "needs_human": False,
+        }
     if (re.search(r"\b(чуж\w*|друг\w* стажер\w*|друг\w* сотрудник\w*)\b", question)
             and re.search(r"заявк|данн|доступ", question)
             and re.search(r"получ|посмотр|откры|доступ|покаж|прочит|разреш", question)):
