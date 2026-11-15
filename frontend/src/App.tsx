@@ -97,7 +97,7 @@ function Dashboard({ user, tasks, requests, firstTask, openAssistant, inlineAssi
       <section className="panel side-links"><div className="side-card-heading"><h2>Полезные ссылки</h2><Link to="/knowledge">Все <Icon name="arrow" /></Link></div><Link to="/requests"><Icon name="arrow" />Мои заявки</Link><Link to="/checklist"><Icon name="arrow" />Чек-лист стажёра</Link><Link to="/knowledge"><Icon name="arrow" />Учебные инструкции</Link><a href="https://github.com/avito-tech/playbook" target="_blank" rel="noreferrer"><Icon name="arrow" />AvitoTech Playbook</a></section>
     </aside>
   </div>
-  return <>
+  return <div className="workspace-page mentor-page">
     {!mentor && <section className="buddy-hero">
       <div><p className="buddy-eyebrow">AI Buddy · помощник стажёра</p><h1>Привет, {user.name}!</h1><p>Помогу разобраться с адаптацией, доступами и первой задачей.</p>
         <button type="button" onClick={() => openAssistant()}>Спросить AI Buddy</button>
@@ -108,7 +108,7 @@ function Dashboard({ user, tasks, requests, firstTask, openAssistant, inlineAssi
       {['Как получить доступ к пространству команды?', 'Где найти документацию команды?', 'Как начать первую задачу?', 'Как посмотреть прогресс?'].map(question =>
         <button type="button" key={question} onClick={() => openAssistant(question)}>{question}<span aria-hidden="true">↗</span></button>)}
     </div>}
-    {mentor && <header className="intro"><h1>Здравствуйте, {user.name}</h1><p>Задачи наставника и заявки закреплённых стажёров</p></header>}
+    {mentor && <header className="intro page-heading"><span className="page-kicker">Рабочее пространство наставника</span><h1>Здравствуйте, {user.name}</h1><p>Задачи наставника и заявки закреплённых стажёров</p></header>}
     <div className="dashboard">
       <section className="panel timeline">
         <h2>{user.role === 'mentor' ? 'Задачи наставника' : 'Прогресс адаптации'}</h2>
@@ -142,7 +142,7 @@ function Dashboard({ user, tasks, requests, firstTask, openAssistant, inlineAssi
       <section className="panel"><h2>{user.role === 'mentor' ? 'Заявки стажёров' : 'Последние заявки'}</h2><RequestHistory requests={requests.slice(0, 3)} /><Link to="/requests">Открыть заявки</Link></section>
       <section className="panel"><h2>Заблокированные задачи</h2>{firstTask && firstTask.state !== 'ready' && <p>{firstTask.title} — {firstTask.state === 'waiting' ? 'ожидает выдачи доступа' : 'нужен доступ к пространству команды'}</p>}{blocked.length > 0 && <ul>{blocked.map(task => <li key={task.id}>{task.title}</li>)}</ul>}{!blocked.length && (!firstTask || firstTask.state === 'ready') && <p className="muted">Заблокированных задач нет.</p>}</section>
     </div>
-  </>
+  </div>
 }
 
 function Checklist({ tasks, token, role }: { tasks: Task[]; token: string; role: string }) {
@@ -152,9 +152,11 @@ function Checklist({ tasks, token, role }: { tasks: Task[]; token: string; role:
     onSuccess: () => client.invalidateQueries({ queryKey: ['tasks', token] }),
   })
   const groups = Map.groupBy(tasks, task => task.period)
-  return <><header className="intro"><h1>{role === 'mentor' ? 'Задачи наставника' : 'Чек-лист адаптации'}</h1><p>Задачи сгруппированы по периодам стажировки. Периоды показывают, когда их предполагается выполнять.</p></header>
+  const completed = tasks.filter(task => task.status === 'completed').length
+  return <div className="workspace-page checklist-page"><header className="intro page-heading"><span className="page-kicker">Адаптация</span><h1>{role === 'mentor' ? 'Задачи наставника' : 'Чек-лист адаптации'}</h1><p>Задачи сгруппированы по периодам стажировки.</p></header>
     {change.error && <ErrorNotice error={change.error} />}
     {!tasks.length && <p>Задач пока нет.</p>}
+    {tasks.length > 0 && <section className="panel page-summary"><span className="page-summary-icon"><Icon name="check" /></span><div><strong>Выполнено {completed} из {tasks.length}</strong><p>Отмечайте задачи по мере выполнения</p></div><progress aria-label="Выполнение задач" value={completed} max={tasks.length} /></section>}
     {Array.from(groups, ([period, entries]) => <section className="panel stack" key={period}>
       <h2>{periods[period] ?? period}</h2>
       <ul className="rows">{entries.map(task => <li key={task.id} className="row">
@@ -167,7 +169,7 @@ function Checklist({ tasks, token, role }: { tasks: Task[]; token: string; role:
         <span className="status" data-status={task.status}>{statuses[task.status]}</span>
       </li>)}</ul>
     </section>)}
-  </>
+  </div>
 }
 
 type ChatChoice = { id: string; name: string; kind: 'mentor' | 'peer' }
@@ -399,12 +401,12 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
     onSuccess: ({ request }) => { setSelected(request); void updateHistory(); void client.invalidateQueries({ queryKey: ['tasks', token] }) },
   })
   const pending = prepare.isPending || confirm.isPending || grant.isPending
-  return <>
-    <header className="intro"><h1>{user.role === 'mentor' ? 'Заявки стажёров' : 'Мои заявки'}</h1><p>{user.role === 'mentor' ? 'Отправленные заявки закреплённых за вами стажёров' : 'Заявки отправляются в учебный сервис'}</p></header>
+  return <div className="workspace-page requests-page">
+    <header className="intro page-heading"><span className="page-kicker">Доступы</span><h1>{user.role === 'mentor' ? 'Заявки стажёров' : 'Мои заявки'}</h1><p>{user.role === 'mentor' ? 'Отправленные заявки закреплённых за вами стажёров' : 'Заявки отправляются в учебный сервис'}</p></header>
     <div className="dashboard">
       {user.role === 'mentor' && <section className="panel" id="mentor-messages"><h2>Обращения стажёров</h2>{mentorMessages.isPending && <p>Загружаем обращения…</p>}{mentorMessages.error && <ErrorNotice error={mentorMessages.error} retry={() => void mentorMessages.refetch()} />}{mentorMessages.data?.messages.length === 0 && <p className="muted">Обращений пока нет.</p>}<ul className="rows">{mentorMessages.data?.messages.map(message => <li className="row" key={message.id}><div><strong>{message.intern_name}</strong><p>{message.message}</p></div></li>)}</ul></section>}
       <section className="panel">
-        <h2>Доступ к пространству команды</h2>
+        <div className="card-title"><span className="page-summary-icon"><Icon name="briefcase" /></span><div><h2>Доступ к пространству команды</h2><p>Запрос доступа к учебным материалам команды</p></div></div>
         {user.role === 'intern' ? <>
           <form className="composer" onSubmit={event => {
             event.preventDefault()
@@ -432,7 +434,7 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
         </> : <p className="muted">Создание заявок доступно стажёрам.</p>}
       </section>
       <section className="panel">
-        <h2>История заявок</h2>
+        <div className="card-title"><span className="page-summary-icon"><Icon name="check" /></span><div><h2>История заявок</h2><p>Статус и следующие шаги</p></div></div>
         {review.error && <ErrorNotice error={review.error} />}
         <RequestHistory requests={requests} actions={request => {
           if (user.role === 'mentor' && ['submitted', 'in_review'].includes(request.status)) {
@@ -451,7 +453,7 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
         )}
       </section>
     </div>
-  </>
+  </div>
 }
 
 function Knowledge({ token }: { token: string }) {
@@ -466,12 +468,12 @@ function Knowledge({ token }: { token: string }) {
     ['Доклад о дизайн-системе', 'Видео о дизайн-системе Авито', 'https://rutube.ru/video/6a203a00a9ef7cdd25d811a01cacd61b/'],
   ]
   const result = useQuery({ queryKey: ['knowledge', token], queryFn: () => api<{ documents: Document[] }>('/knowledge', token) })
-  return <><header className="intro"><h1>База знаний</h1><p>Инструкции, доступные вашей роли</p></header>
+  return <div className="workspace-page knowledge-page"><header className="intro page-heading"><span className="page-kicker">Материалы</span><h1>База знаний</h1><p>Инструкции, доступные вашей роли</p></header>
     {result.isPending && <p role="status">Загружаем инструкции…</p>}
     {result.error && <ErrorNotice error={result.error} retry={() => void result.refetch()} />}
-    {result.data?.documents.map(document => <section key={document.id} id={document.id} className="panel stack">
-      <h2>{document.title}</h2><p>{document.content}</p><small className="muted">Учебный материал</small>
-    </section>)}
+    <div className="knowledge-grid">{result.data?.documents.map(document => <section key={document.id} id={document.id} className="panel stack knowledge-card">
+      <span className="page-summary-icon"><Icon name="book" /></span><h2>{document.title}</h2><p>{document.content}</p><small className="knowledge-tag">Учебный материал</small>
+    </section>)}</div>
     {result.data?.documents.length === 0 && <p>Доступных инструкций нет.</p>}
     <section className="panel stack">
       <h2>Открытые материалы Авито</h2>
@@ -480,7 +482,7 @@ function Knowledge({ token }: { token: string }) {
         <li className="row" key={url}><div><a href={url} target="_blank" rel="noopener noreferrer">{title} ↗</a><p>{description}</p></div></li>
       )}</ul>
     </section>
-  </>
+  </div>
 }
 
 function Workspace({ token, openAssistant, inlineAssistant }: { token: string; openAssistant: (question?: string) => void; inlineAssistant?: ReactNode }) {
@@ -548,9 +550,8 @@ export function App() {
         {session.isPending && <p role="status">Загружаем профили…</p>}
         {session.error && <ErrorNotice error={session.error} retry={() => void session.refetch()} />}
         <Routes>
-          <Route path="/profile" element={<section className="panel profile-page">
-          <h1>Профиль</h1>
-          {current && <p>{current.name}, {roles[current.role] ?? current.role}</p>}
+          <Route path="/profile" element={<div className="workspace-page"><header className="intro page-heading"><span className="page-kicker">Настройки</span><h1>Профиль</h1><p>Учётная запись и оформление</p></header><section className="panel profile-page">
+          {current && <div className="profile-identity"><ChatAvatar kind={current.name === 'Анна' ? 'anna' : current.name === 'Иван' ? 'ivan' : 'mentor'} /><div><strong>{current.name}</strong><p>{roles[current.role] ?? current.role}</p></div></div>}
           <label htmlFor="identity">Демо-профиль <select id="identity" disabled={!users.length} value={current?.token ?? ''} onChange={event => {
             if (current) client.removeQueries({ predicate: query => query.queryKey.includes(current.token) })
             setChatHistory([])
@@ -574,7 +575,7 @@ export function App() {
             <option value="dark">Тёмная</option>
           </select></label>
           </div>
-        </section>} />
+        </section></div>} />
           <Route path="*" element={current && <Workspace key={current.token} token={current.token} openAssistant={openAssistant} inlineAssistant={inlineChatOpen ? <Assistant key={chatSession} token={current.token} user={current} canRequest={current.role === 'intern'} history={chatHistory} initialQuestion={initialQuestion} embedded addEntry={entry => setChatHistory(old => [...old, entry])} onClose={() => { setInlineChatOpen(false); setInitialQuestion(null) }} /> : undefined} />} />
         </Routes>
         <footer>Демонстрационный прототип. Инструкции и сервис заявок учебные.</footer>

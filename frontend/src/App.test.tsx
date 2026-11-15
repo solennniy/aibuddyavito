@@ -98,6 +98,21 @@ beforeEach(() => sessionStorage.clear())
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('AI Buddy workspace', () => {
+  it('shows the redesigned sections and keeps theme selection in profile', async () => {
+    fixture()
+    await screen.findByRole('heading', { name: 'Чем могу помочь сегодня?' })
+    fireEvent.click(link('Чек-лист'))
+    await screen.findByText('Выполнено 0 из 2')
+    fireEvent.click(link('Мои заявки'))
+    await screen.findByText('Статус и следующие шаги')
+    fireEvent.click(link('База знаний'))
+    await screen.findByText('Учебная инструкция')
+    fireEvent.click(screen.getByRole('link', { name: 'Открыть профиль' }))
+    const theme = await screen.findByRole('combobox', { name: 'Тема' })
+    fireEvent.change(theme, { target: { value: 'dark' } })
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'))
+    fireEvent.change(theme, { target: { value: 'system' } })
+  })
   it('opens a suggested question in the assistant', async () => {
     fixture()
     await screen.findByRole('heading', { name: 'Чем могу помочь сегодня?' })
