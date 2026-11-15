@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useSearchParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type AccessRequest, type ChatAnswer, type DemoUser, type Document, type Task, type User } from './api'
 import avitoLogo from './assets/avito-logo.webp?url'
 import chatAvatars from './assets/chat-avatars.webp?url'
+import buddyMascot from './assets/buddy-mascot.webp?url'
 
 const periods: Record<string, string> = {
   week_1: 'Первая неделя', week_2: 'Вторая неделя', month_1: 'Первый месяц',
@@ -11,7 +12,7 @@ const periods: Record<string, string> = {
 }
 const statuses: Record<string, string> = {
   todo: 'Предстоит', in_progress: 'В работе', completed: 'Выполнено', blocked: 'Заблокировано',
-  draft: 'Черновик', submitted: 'Отправлена в учебный сервис', in_review: 'Рассматривается',
+  draft: 'Не отправлена', submitted: 'Отправлена в учебный сервис', in_review: 'Рассматривается',
   approved: 'Согласована', rejected: 'Отклонена', failed: 'Ошибка обработки',
 }
 const roles: Record<string, string> = { intern: 'Стажёр', mentor: 'Наставник', admin: 'Администратор' }
@@ -21,6 +22,21 @@ type FirstTask = { title: string; state: 'blocked' | 'waiting' | 'ready'; altern
 
 function ChatIcon() {
   return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l1.7-3.2a7.5 7.5 0 0 1 5.8-11.8h.1A7.5 7.5 0 0 1 20 11.5Z"/><path d="M9 10h7m-7 3h5"/></svg>
+}
+
+function Icon({ name }: { name: 'home' | 'check' | 'briefcase' | 'book' | 'user' | 'search' | 'arrow' | 'chat' | 'grid' }) {
+  const shapes: Record<typeof name, string> = {
+    home: 'M3 11 12 4l9 7M5 10v9h14v-9M9 19v-6h6v6',
+    check: 'M9 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3M9 3h6v4H9zM8 14l2.5 2.5L16 11',
+    briefcase: 'M4 8h16v11H4zM9 8V5h6v3M4 12h16',
+    book: 'M12 7c-3-3-6-3-9-2v13c3-1 6-1 9 2m0-13c3-3 6-3 9-2v13c-3-1-6-1-9 2m0-13v13',
+    user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20a7 7 0 0 1 14 0',
+    search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zm5-2 4 4',
+    arrow: 'M5 12h14m-5-5 5 5-5 5',
+    chat: 'M4 5h16v12H9l-5 3V5zm4 5h8m-8 3h5',
+    grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+  }
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={shapes[name]} /></svg>
 }
 
 function Chevron({ down = false }: { down?: boolean }) {
@@ -39,12 +55,48 @@ function RequestHistory({ requests, actions }: { requests: AccessRequest[]; acti
     </li>)}</ul> : <p className="muted">Заявок пока нет.</p>
 }
 
-function Dashboard({ user, tasks, requests, firstTask, openAssistant }: { user: User; tasks: Task[]; requests: AccessRequest[]; firstTask?: FirstTask | null; openAssistant: (question?: string) => void }) {
+function Dashboard({ user, tasks, requests, firstTask, openAssistant, inlineAssistant }: { user: User; tasks: Task[]; requests: AccessRequest[]; firstTask?: FirstTask | null; openAssistant: (question?: string) => void; inlineAssistant?: ReactNode }) {
   const completed = tasks.filter(task => task.status === 'completed').length
   const upcoming = tasks.filter(task => task.status === 'todo' || task.status === 'in_progress')
   const blocked = tasks.filter(task => task.status === 'blocked')
   const mentor = user.role === 'mentor'
   const allCompleted = tasks.length > 0 && completed === tasks.length
+  const [prompt, setPrompt] = useState('')
+  if (!mentor) return <div className={`home-layout${inlineAssistant ? ' chat-expanded' : ''}`}>
+    <div className="home-primary">
+      <section className="home-welcome">
+        <div><p>Добро пожаловать, {user.name}!</p><h1>Чем могу помочь сегодня?</h1><p>Я AI Buddy — твой помощник в адаптации. Задавай вопросы про процессы, инструменты, команду и рабочие задачи.</p></div>
+        <img src={buddyMascot} alt="" />
+      </section>
+      <section className="home-ask panel">
+        {inlineAssistant ? inlineAssistant : <>
+        <form onSubmit={event => { event.preventDefault(); if (prompt.trim()) openAssistant(prompt.trim()) }}>
+          <Icon name="search" /><label className="visually-hidden" htmlFor="home-question">Вопрос AI Buddy</label>
+          <input id="home-question" value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="Спроси об адаптации или рабочих задачах" />
+          <button aria-label="Открыть вопрос в AI Buddy" type="submit"><Icon name="arrow" /></button>
+        </form>
+        <div className="question-chips">{['Как получить доступ?', 'Где найти документацию?', 'Как начать первую задачу?', 'Как посмотреть прогресс?'].map(question =>
+          <button type="button" key={question} onClick={() => openAssistant(question)}>{question}</button>)}</div>
+        </>}
+      </section>
+      <section className="home-scenarios"><h2>Популярные сценарии</h2><div>
+        <button type="button" onClick={() => openAssistant('Как получить доступ к пространству команды?')}><Icon name="check" /><strong>Получить<br />доступ</strong><span>Заявка на пространство команды</span><Icon name="arrow" /></button>
+        <button type="button" onClick={() => openAssistant('Как начать первую задачу?')}><Icon name="briefcase" /><strong>Начать<br />первую задачу</strong><span>Шаги и подготовка</span><Icon name="arrow" /></button>
+        <Link to="/knowledge"><Icon name="book" /><strong>Изучить<br />материалы</strong><span>Учебная база знаний</span><Icon name="arrow" /></Link>
+        <button type="button" onClick={() => openAssistant('Как познакомиться с командой?')}><Icon name="user" /><strong>Познакомиться<br />с командой</strong><span>Первые встречи</span><Icon name="arrow" /></button>
+      </div></section>
+      <section className="home-feature panel"><div><span className="feature-tag">Следующий шаг</span><h2>Первая рабочая задача</h2><p>{firstTask?.title ?? 'Изучить материалы команды и подготовить первый PR'}</p>
+        {firstTask?.state === 'ready' ? <p role="status">Можно начать, доступ выдан</p> : firstTask?.state === 'waiting' ? <p role="status">Задача ждёт доступа</p> : <p>Чтобы начать, запросите доступ к пространству команды.</p>}
+        <div className="feature-actions"><Link className="button" to="/requests">{firstTask?.state === 'ready' ? 'Открыть заявки' : 'Проверить заявку'}</Link><button className="secondary" type="button" onClick={() => openAssistant('Как получить доступ к пространству команды?')}>Спросить AI Buddy</button></div>
+      </div><div className="feature-visual"><Icon name="briefcase" /><strong>Пространство команды</strong><span>{firstTask?.state === 'ready' ? 'Доступ выдан' : 'Доступ к материалам'}</span></div></section>
+    </div>
+    <aside className="home-side" aria-label="Прогресс и задачи">
+      <section className="panel timeline side-progress"><div className="side-card-heading"><h2>Мой прогресс</h2><span>{completed} из {tasks.length} задач</span></div><progress aria-label="Прогресс адаптации" aria-valuetext={`${completed} из ${tasks.length} задач выполнено`} value={completed} max={tasks.length || 1} /><span className="visually-hidden">{completed} из {tasks.length} задач выполнено</span><ul className="progress-tasks">{tasks.slice(0, 5).map(task => <li key={task.id} className={task.id === upcoming[0]?.id ? 'current' : ''}><span className={`task-dot ${task.status === 'completed' ? 'done' : ''}`}>{task.status === 'completed' ? '✓' : ''}</span><span>{task.title}</span></li>)}</ul><Link className="visually-hidden" to="/checklist">Открыть чек-лист</Link></section>
+      <section className="panel side-next"><div className="side-card-heading"><h2>Мои ближайшие задачи</h2><span className="task-count">{upcoming.length}</span><Link to="/checklist" aria-label="Все задачи"><Icon name="arrow" /></Link></div><ul className="next-list">{upcoming.slice(0, 3).map(task => <li key={task.id}><span className="next-icon"><Icon name="check" /></span><div><strong>{task.title}</strong><span>{periods[task.period] ?? task.period}</span></div><span className="status" data-status={task.status}>{statuses[task.status]}</span></li>)}</ul>{!upcoming.length && <p className="muted">{allCompleted ? 'Все задачи выполнены.' : 'Ближайших задач нет.'}</p>}</section>
+      <section className="panel side-knowledge"><div className="side-card-heading"><h2>База знаний</h2><Link to="/knowledge">Все материалы <Icon name="arrow" /></Link></div><div className="knowledge-tiles"><Link to="/knowledge#privacy"><Icon name="book" /><span>Защита<br />данных</span></Link><Link to="/knowledge#tools-access"><Icon name="grid" /><span>Сервисы</span></Link><Link to="/knowledge#first-meeting"><Icon name="user" /><span>Команда</span></Link><Link to="/knowledge#onboarding"><Icon name="chat" /><span>Первые<br />шаги</span></Link></div></section>
+      <section className="panel side-links"><div className="side-card-heading"><h2>Полезные ссылки</h2><Link to="/knowledge">Все <Icon name="arrow" /></Link></div><Link to="/requests"><Icon name="arrow" />Мои заявки</Link><Link to="/checklist"><Icon name="arrow" />Чек-лист стажёра</Link><Link to="/knowledge"><Icon name="arrow" />Учебные инструкции</Link><a href="https://github.com/avito-tech/playbook" target="_blank" rel="noreferrer"><Icon name="arrow" />AvitoTech Playbook</a></section>
+    </aside>
+  </div>
   return <>
     {!mentor && <section className="buddy-hero">
       <div><p className="buddy-eyebrow">AI Buddy · помощник стажёра</p><h1>Привет, {user.name}!</h1><p>Помогу разобраться с адаптацией, доступами и первой задачей.</p>
@@ -199,7 +251,7 @@ function SupportConversation({ token }: { token: string }) {
   </section>
 }
 
-function Assistant({ token, user, canRequest, history, addEntry, onClose, initialQuestion }: {
+function Assistant({ token, user, canRequest, history, addEntry, onClose, initialQuestion, embedded = false }: {
   token: string
   user: User
   canRequest: boolean
@@ -207,9 +259,11 @@ function Assistant({ token, user, canRequest, history, addEntry, onClose, initia
   addEntry: (entry: ChatEntry) => void
   onClose: () => void
   initialQuestion?: string | null
+  embedded?: boolean
 }) {
   const client = useQueryClient()
   const [question, setQuestion] = useState(initialQuestion ?? '')
+  const submittedInitial = useRef(false)
   const [view, setView] = useState<'list' | 'ai' | 'support' | 'person'>(initialQuestion !== null && initialQuestion !== undefined ? 'ai' : 'list')
   const [choice, setChoice] = useState<ChatChoice | null>(null)
   const [handoffMessage, setHandoffMessage] = useState('')
@@ -229,6 +283,12 @@ function Assistant({ token, user, canRequest, history, addEntry, onClose, initia
     }),
     onSuccess: (result, message) => { addEntry({ question: message, result }); setQuestion('') },
   })
+  useEffect(() => {
+    if (embedded && initialQuestion?.trim() && !submittedInitial.current) {
+      submittedInitial.current = true
+      send.mutate(initialQuestion.trim())
+    }
+  }, [embedded, initialQuestion])
   const complete = useMutation({
     mutationFn: (id: string) => api<Task & { next_task: Pick<Task, 'id' | 'title' | 'description'> | null }>(
       '/tasks/' + encodeURIComponent(id) + '?include_next=true', token, { status: 'completed' }, 'PATCH',
@@ -251,7 +311,8 @@ function Assistant({ token, user, canRequest, history, addEntry, onClose, initia
     }
   }
   return <>
-    <header className="chat-heading">{view !== 'list' && <button type="button" className="chat-back" aria-label="Назад к чатам" onClick={() => setView('list')}>‹</button>}<h2>{view === 'person' ? choice?.name : view === 'ai' ? 'AI Buddy' : view === 'support' ? 'Поддержка' : 'Сообщения'}</h2><button type="button" className="chat-close" aria-label="Свернуть сообщения" onClick={onClose}><Chevron down /></button></header>
+    {!embedded && <header className="chat-heading">{view !== 'list' && <button type="button" className="chat-back" aria-label="Назад к чатам" onClick={() => setView('list')}>‹</button>}<h2>{view === 'person' ? choice?.name : view === 'ai' ? 'AI Buddy' : view === 'support' ? 'Поддержка' : 'Сообщения'}</h2><button type="button" className="chat-close" aria-label="Свернуть сообщения" onClick={onClose}><Chevron down /></button></header>}
+    {embedded && view === 'person' && <header className="chat-heading"><button type="button" className="chat-back" onClick={() => setView('ai')}>‹ К AI Buddy</button><h2>{choice?.name}</h2></header>}
     {view === 'list' && <div className="chat-list">
       {canRequest ? <button className="chat-list-item support-item" type="button" onClick={() => setView('ai')}><ChatAvatar kind="ai" /><span className="chat-list-copy"><strong>AI Buddy</strong><span>{history.at(-1)?.result.answer ?? 'Помощь с адаптацией'}</span></span></button>
         : <button className="chat-list-item support-item" type="button" onClick={() => setView('support')}><ChatAvatar kind="support" /><span className="chat-list-copy"><strong>Спросить поддержку</strong><span>Учебный прототип</span></span></button>}
@@ -298,6 +359,7 @@ function Assistant({ token, user, canRequest, history, addEntry, onClose, initia
         </form>
       </section>
     </div>}
+    {embedded && <button type="button" className="collapse-dialog" disabled={send.isPending || complete.isPending} onClick={onClose}>Свернуть диалог <Chevron down /></button>}
   </>
 }
 
@@ -306,6 +368,8 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
   const [params] = useSearchParams()
   const [reason, setReason] = useState(() => (params.get('reason') ?? '').slice(0, 500))
   const [selected, setSelected] = useState<AccessRequest | null>(null)
+  const [reviewReason, setReviewReason] = useState('')
+  const [submissionKey, setSubmissionKey] = useState('')
   const mentorMessages = useQuery({
     queryKey: ['mentor-messages', token],
     queryFn: () => api<{ messages: { id: string; intern_name: string; message: string }[] }>('/mentor/messages', token),
@@ -323,11 +387,11 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
   const prepare = useMutation({
     mutationFn: ({ reason, key }: { reason: string; key: string }) =>
       api<{ request: AccessRequest }>('/requests', token, { resource: 'team_workspace', reason }, 'POST', key),
-    onSuccess: ({ request }) => { setSelected(request); setReason(''); void updateHistory() },
+    onSuccess: ({ request }) => { setSelected(request); confirm.mutate(request.id); void updateHistory() },
   })
   const confirm = useMutation({
     mutationFn: (id: string) => api<{ request: AccessRequest }>('/requests/' + encodeURIComponent(id) + '/confirm', token, { confirmed: true }),
-    onSuccess: ({ request }) => { setSelected(request); void updateHistory(); void client.invalidateQueries({ queryKey: ['tasks', token] }) },
+    onSuccess: ({ request }) => { setSelected(request); setReviewReason(''); setReason(''); setSubmissionKey(''); void updateHistory(); void client.invalidateQueries({ queryKey: ['tasks', token] }) },
     onError: () => { void updateHistory() },
   })
   const grant = useMutation({
@@ -347,23 +411,23 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
             const value = reason.trim()
             if (pending || !value) return
             confirm.reset()
-            const previous = prepare.variables
-            const key = prepare.isError && previous?.reason === value ? previous.key : crypto.randomUUID()
-            prepare.mutate({ reason: value, key })
+            prepare.reset()
+            setSelected(null)
+            setReviewReason(value)
+            setSubmissionKey(crypto.randomUUID())
           }}>
             <label htmlFor="reason">Зачем нужен доступ</label>
             <textarea id="reason" value={reason} onChange={event => setReason(event.target.value)} maxLength={500} required />
-            <button type="submit" id="prepare" disabled={pending}>Подготовить заявку</button>
+            <button type="submit" id="prepare" disabled={pending}>Проверить заявку</button>
           </form>
-          {prepare.error && <ErrorNotice error={prepare.error} />}
-          {selected && <div className="draft" aria-live="polite">
-            <strong>{selected.ticket_id ?? 'Проверьте черновик'}</strong>
-            <p>{selected.reason}</p><p>{selected.next_step}</p>
-            {['draft', 'failed'].includes(selected.status) ?
-              <button id="confirm" onClick={() => confirm.mutate(selected.id)} disabled={pending}>Подтвердить отправку</button>
-              : <p className="status" data-status={selected.status}>{selected.status === 'completed' ? 'Доступ выдан' : statuses[selected.status]}</p>}
-            {confirm.error && <ErrorNotice error={confirm.error} retry={() => confirm.mutate(selected.id)} />}
+          {reviewReason && <div className="draft" aria-live="polite">
+            <strong>Проверьте заявку</strong>
+            <p>Пространство команды</p><p>{reviewReason}</p>
+            <button id="confirm" onClick={() => selected ? confirm.mutate(selected.id) : prepare.mutate({ reason: reviewReason, key: submissionKey })} disabled={pending}>Подтвердить отправку</button>
+            {prepare.error && <ErrorNotice error={prepare.error} retry={() => prepare.mutate({ reason: reviewReason, key: submissionKey })} />}
+            {confirm.error && selected && <ErrorNotice error={confirm.error} retry={() => confirm.mutate(selected.id)} />}
           </div>}
+          {selected && !reviewReason && <div className="draft" aria-live="polite"><strong>{selected.ticket_id ?? 'Заявка'}</strong><p>{selected.reason}</p><p>{selected.next_step}</p><p className="status" data-status={selected.status}>{selected.status === 'completed' ? 'Доступ выдан' : statuses[selected.status]}</p></div>}
           {pending && <p role="status">Обрабатываем заявку…</p>}
         </> : <p className="muted">Создание заявок доступно стажёрам.</p>}
       </section>
@@ -383,7 +447,7 @@ function Requests({ token, user, requests }: { token: string; user: User; reques
         }} />
         {grant.error && <ErrorNotice error={grant.error} />}
         {user.role === 'intern' && requests.filter(request => ['draft', 'failed'].includes(request.status)).map(request =>
-          <button className="quiet" key={request.id} onClick={() => { confirm.reset(); setSelected(request) }}>Открыть черновик: {request.reason}</button>
+          <button className="quiet" key={request.id} onClick={() => { confirm.reset(); setSelected(request); setReviewReason(request.reason) }}>Продолжить заявку: {request.reason}</button>
         )}
       </section>
     </div>
@@ -419,7 +483,7 @@ function Knowledge({ token }: { token: string }) {
   </>
 }
 
-function Workspace({ token, openAssistant }: { token: string; openAssistant: (question?: string) => void }) {
+function Workspace({ token, openAssistant, inlineAssistant }: { token: string; openAssistant: (question?: string) => void; inlineAssistant?: ReactNode }) {
   const profile = useQuery({ queryKey: ['profile', token], queryFn: () => api<User>('/me', token) })
   const tasks = useQuery({ queryKey: ['tasks', token], queryFn: () => api<{ tasks: Task[]; first_task?: FirstTask | null }>('/tasks', token), refetchInterval: 5000 })
   const requests = useQuery({
@@ -432,7 +496,7 @@ function Workspace({ token, openAssistant }: { token: string; openAssistant: (qu
   if (errors.length) return <ErrorNotice error={errors[0].error!} retry={() => errors.forEach(result => void result.refetch())} />
   if (!profile.data || !tasks.data || !requests.data) return <p role="status">Загружаем ваш маршрут…</p>
   return <Routes>
-    <Route path="/" element={<Dashboard user={profile.data} tasks={tasks.data.tasks} requests={requests.data.requests} firstTask={tasks.data.first_task} openAssistant={openAssistant} />} />
+    <Route path="/" element={<Dashboard user={profile.data} tasks={tasks.data.tasks} requests={requests.data.requests} firstTask={tasks.data.first_task} openAssistant={openAssistant} inlineAssistant={inlineAssistant} />} />
     <Route path="/checklist" element={<Checklist tasks={tasks.data.tasks} token={token} role={profile.data.role} />} />
     <Route path="/requests" element={<Requests token={token} user={profile.data} requests={requests.data.requests} />} />
     <Route path="/knowledge" element={<Knowledge token={token} />} />
@@ -445,9 +509,10 @@ export function App() {
   const client = useQueryClient()
   const [preferred, setPreferred] = useState(() => sessionStorage.getItem('buddy-profile') ?? '')
   const [chatOpen, setChatOpen] = useState(false)
+  const [inlineChatOpen, setInlineChatOpen] = useState(false)
   const [initialQuestion, setInitialQuestion] = useState<string | null>(null)
   const [chatSession, setChatSession] = useState(0)
-  const openAssistant = (question = '') => { setInitialQuestion(question); setChatSession(value => value + 1); setChatOpen(true) }
+  const openAssistant = (question = '') => { setInitialQuestion(question); setChatSession(value => value + 1); setChatOpen(false); setInlineChatOpen(true) }
   const [chatHistory, setChatHistory] = useState<ChatEntry[]>([])
   const [theme, setTheme] = useState(() => localStorage.getItem('buddy-theme') ?? 'system')
   useEffect(() => {
@@ -472,10 +537,12 @@ export function App() {
     </header>
     <div className="shell">
       <nav aria-label="Рабочая область">
-        <NavLink to="/" end>Обзор</NavLink>
-        <NavLink to="/checklist">Чек-лист</NavLink>
-        <NavLink to="/requests">{current?.role === 'mentor' ? 'Заявки стажёров' : 'Мои заявки'}</NavLink>
-        <NavLink to="/knowledge">База знаний</NavLink>
+        <div className="nav-heading"><strong>AI Buddy</strong><span>Твой помощник в Авито</span></div>
+        <NavLink to="/" end><Icon name="home" />Обзор</NavLink>
+        <NavLink to="/checklist"><Icon name="check" />Чек-лист</NavLink>
+        <NavLink to="/requests"><Icon name="briefcase" />{current?.role === 'mentor' ? 'Заявки стажёров' : 'Мои заявки'}</NavLink>
+        <NavLink to="/knowledge"><Icon name="book" />База знаний</NavLink>
+        <NavLink to="/profile"><Icon name="user" />Профиль</NavLink>
       </nav>
       <main>
         {session.isPending && <p role="status">Загружаем профили…</p>}
@@ -488,6 +555,7 @@ export function App() {
             if (current) client.removeQueries({ predicate: query => query.queryKey.includes(current.token) })
             setChatHistory([])
             setChatOpen(false)
+            setInlineChatOpen(false)
             sessionStorage.setItem('buddy-profile', event.target.value)
             setPreferred(event.target.value)
           }}>
@@ -507,7 +575,7 @@ export function App() {
           </select></label>
           </div>
         </section>} />
-          <Route path="*" element={current && <Workspace key={current.token} token={current.token} openAssistant={openAssistant} />} />
+          <Route path="*" element={current && <Workspace key={current.token} token={current.token} openAssistant={openAssistant} inlineAssistant={inlineChatOpen ? <Assistant key={chatSession} token={current.token} user={current} canRequest={current.role === 'intern'} history={chatHistory} initialQuestion={initialQuestion} embedded addEntry={entry => setChatHistory(old => [...old, entry])} onClose={() => { setInlineChatOpen(false); setInitialQuestion(null) }} /> : undefined} />} />
         </Routes>
         <footer>Демонстрационный прототип. Инструкции и сервис заявок учебные.</footer>
       </main>

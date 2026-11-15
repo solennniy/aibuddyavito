@@ -312,12 +312,12 @@ def test_model_selection_is_constrained(client, monkeypatch):
     assert "mentor-only" not in answer["answer"]
     provider.answer = json.dumps({
         "source_id": "team-space",
-        "evidence": "Проверьте черновик и подтвердите отправку.",
-        "answer": "Сначала проверьте черновик. Затем подтвердите отправку.",
+        "evidence": "Проверьте название ресурса и причину, затем подтвердите отправку.",
+        "answer": "Сначала проверьте данные. Затем подтвердите отправку.",
     })
     generated = client.post("/api/chat", headers=ANNA, json={"message": "Как отправить заявку?"}).json()
     assert generated["mode"] == "llm"
-    assert generated["answer"] == "Сначала проверьте черновик. Затем подтвердите отправку."
+    assert generated["answer"] == "Сначала проверьте данные. Затем подтвердите отправку."
     assert generated["sources"][0]["id"] == "team-space"
     provider.answer = json.dumps({
         "source_id": "team-space", "evidence": "Доступ выдаётся за 5 минут.",
