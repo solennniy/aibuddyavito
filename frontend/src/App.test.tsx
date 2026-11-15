@@ -17,6 +17,7 @@ function fixture(path = '/') {
     { id: 't2', title: 'Согласовать цели', description: 'Нужен наставник', status: 'blocked', period: 'week_1', completed_at: null, document_ids: [], request_ids: ['req'] },
   ]
   let request: AccessRequest | null = null
+  const conversation: { id: string; sender: string; message: string; created_at: string }[] = []
   const fail = new Map<string, Response>()
   const mock = vi.fn(async (url: string, options: RequestInit) => {
     const { method, body } = options
@@ -38,6 +39,9 @@ function fixture(path = '/') {
     }
     if (url === '/api/knowledge') return Response.json({ documents: person?.role === 'intern' ? [{ id: 'kb', title: 'Учебная инструкция', content: 'Запросите доступ.', source_type: 'synthetic' }] : [] })
     if (url === '/api/chat') {
+      if (payload.message.startsWith('Неизвестный вопрос')) return Response.json({
+        answer: 'Не нашёл инструкцию.', sources: [], mode: 'demo', action: null, needs_human: true,
+      })
       if (payload.message === 'Как прочитать введение?') return Response.json({
         answer: 'Начните с материалов команды.', sources: [], mode: 'demo', action: null, task_id: 't1',
       })
@@ -48,6 +52,22 @@ function fixture(path = '/') {
       return Response.json({ answer: 'Подготовьте заявку.', sources: [{ id: 'kb', title: 'Учебная инструкция' }], mode: 'demo', action: { resource: 'team_workspace' } })
     }
     if (url === '/api/mentor/messages') return Response.json({ messages: [] })
+    if (url === '/api/chat/contacts') return Response.json({ contacts: person?.role === 'mentor' ? [{ id: 'anna', name: 'Анна', kind: 'mentor' }] : [{ id: 'mentor', name: 'Мария', kind: 'mentor' }, { id: 'ivan', name: 'Иван', kind: 'peer' }] })
+    if (url.startsWith('/api/peer/conversations/')) {
+      if (method === 'POST') {
+        conversation.push({ id: 'peer-message', sender: 'me', message: payload.message, created_at: '2026-11-14' })
+        return Response.json({ id: 'peer-message' })
+      }
+      return Response.json({ messages: conversation })
+    }
+    if (url === '/api/mentor/conversations') return Response.json({ conversations: [{ intern_id: 'anna', intern_name: 'Анна' }] })
+    if (url.startsWith('/api/mentor/conversations/')) {
+      if (method === 'POST') {
+        conversation.push({ id: 'reply', sender: 'mentor', message: payload.message, created_at: '2026-11-14' })
+        return Response.json({ id: 'reply' })
+      }
+      return Response.json({ messages: conversation })
+    }
     if (url === '/api/requests' && method === 'POST') {
       request = { id: 'req', resource: payload.resource, reason: payload.reason, status: 'draft', ticket_id: null, next_step: 'Проверьте заявку.' }
       return Response.json({ request })
@@ -78,11 +98,77 @@ beforeEach(() => sessionStorage.clear())
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('AI Buddy workspace', () => {
+  it('opens a suggested question in the assistant', async () => {
+    fixture()
+    await screen.findByRole('heading', { name: 'Привет, Анна!' })
+    click('Где найти документацию команды?')
+    expect((screen.getByRole('textbox', { name: 'Ваш вопрос' }) as HTMLTextAreaElement).value).toBe('Где найти документацию команды?')
+  })
+  it('offers a mentor after five consecutive unanswered questions', async () => {
+    const { mock } = fixture()
+    await screen.findByRole('heading', { name: 'Привет, Анна!' })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Сообщения' }).at(-1)!)
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Чат AI Buddy' })).getByRole('button', { name: /AI Buddy/ }))
+    for (let i = 1; i <= 5; i++) {
+      fill('Ваш вопрос', 'Неизвестный вопрос ' + i)
+      click('Отправить')
+      await screen.findByText('Неизвестный вопрос ' + i)
+      if (i < 5) expect(screen.queryByRole('button', { name: 'Написать наставнику' })).toBeNull()
+    }
+    click('Написать наставнику')
+    expect((screen.getByRole('textbox', { name: 'Сообщение' }) as HTMLTextAreaElement).value).toContain('Неизвестный вопрос 5')
+    expect(mock.mock.calls.some(([url, options]) => url === '/api/mentor/messages' && options.method === 'POST')).toBe(false)
+  })
+  it('resets the unanswered count after a successful answer', async () => {
+    fixture()
+    await screen.findByRole('heading', { name: 'Привет, Анна!' })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Сообщения' }).at(-1)!)
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Чат AI Buddy' })).getByRole('button', { name: /AI Buddy/ }))
+    for (let i = 1; i <= 4; i++) {
+      fill('Ваш вопрос', 'Неизвестный вопрос ' + i)
+      click('Отправить')
+      await screen.findByText('Неизвестный вопрос ' + i)
+    }
+    fill('Ваш вопрос', 'Как подать заявку?')
+    click('Отправить')
+    await screen.findByText('Подготовьте заявку.')
+    fill('Ваш вопрос', 'Неизвестный вопрос 5')
+    click('Отправить')
+    await screen.findByText('Неизвестный вопрос 5')
+    expect(screen.queryByRole('button', { name: 'Написать наставнику' })).toBeNull()
+  })
+  it('shows AI Buddy first and lets an intern message another intern', async () => {
+    fixture()
+    await screen.findByRole('heading', { name: 'Привет, Анна!' })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Сообщения' }).at(-1)!)
+    expect(within(screen.getByRole('complementary', { name: 'Чат AI Buddy' })).getByRole('button', { name: /AI Buddy/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Мария/ })).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: /Иван/ }))
+    fill('Сообщение', 'Привет, Иван!')
+    click('Отправить')
+    await screen.findByText('Привет, Иван!')
+  })
+
+  it('lets a mentor select an intern and send a reply', async () => {
+    fixture()
+    await screen.findByRole('heading', { name: 'Привет, Анна!' })
+    switchTo('mentor', 'Обзор')
+    await screen.findByRole('heading', { name: 'Здравствуйте, Мария' })
+    expect(screen.getByText('Задачи наставника и заявки закреплённых стажёров')).toBeTruthy()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Сообщения' }).at(-1)!)
+    expect(screen.getByRole('button', { name: /Спросить поддержку/ })).toBeTruthy()
+    fireEvent.click(await screen.findByRole('button', { name: /Анна/ }))
+    fill('Сообщение', 'Открой README')
+    click('Отправить')
+    await screen.findByText(/Открой README/)
+  })
+
   it('saves checklist progress from chat after clicking confirmation', async () => {
     const { mock } = fixture('/checklist')
     const task = await screen.findByRole('checkbox', { name: 'Прочитать введение' })
     expect(screen.queryAllByRole('button', { name: /Спросить AI Buddy/ })).toHaveLength(0)
     fireEvent.click(screen.getAllByRole('button', { name: 'Сообщения' }).at(-1)!)
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Чат AI Buddy' })).getByRole('button', { name: /AI Buddy/ }))
     fill('Ваш вопрос', 'Как прочитать введение?')
     click('Отправить')
     await screen.findByText('Начните с материалов команды.')
@@ -98,8 +184,9 @@ describe('AI Buddy workspace', () => {
 
   it('navigates from onboarding to an explicitly confirmed request and hides it when changing identities', async () => {
     const { fail, mock } = fixture()
-    await screen.findByRole('heading', { name: 'Здравствуйте, Анна' })
+    await screen.findByRole('heading', { name: 'Привет, Анна!' })
     fireEvent.click(screen.getAllByRole('button', { name: 'Сообщения' }).at(-1)!)
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Чат AI Buddy' })).getByRole('button', { name: /AI Buddy/ }))
     fill('Ваш вопрос', 'Как получить доступ к пространству команды?')
     fail.set('POST /api/chat', Response.json({ detail: 'Чат временно недоступен' }, { status: 503 }))
     click('Отправить')
@@ -146,6 +233,7 @@ describe('AI Buddy workspace', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Прочитать введение' }))
     await waitFor(() => expect((screen.getByRole('checkbox', { name: 'Прочитать введение' }) as HTMLInputElement).checked).toBe(false))
     switchTo('mentor', 'Чек-лист')
-    await screen.findByText('У этой роли нет задач стажёра.')
+    await screen.findByRole('heading', { name: 'Задачи наставника' })
+    await screen.findByText('Задач пока нет.')
   })
 })

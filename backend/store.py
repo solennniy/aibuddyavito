@@ -49,3 +49,32 @@ class MentorMessage(Base):
     owner: Mapped[str] = mapped_column(String(40), index=True)
     message: Mapped[str] = mapped_column(String(2000))
     created_at: Mapped[str] = mapped_column(default=now)
+
+
+class MentorReply(Base):
+    __tablename__ = "mentor_replies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(40), index=True)
+    mentor_id: Mapped[str] = mapped_column(String(40))
+    message: Mapped[str] = mapped_column(String(2000))
+    created_at: Mapped[str] = mapped_column(default=now)
+
+
+class PeerMessage(Base):
+    __tablename__ = "peer_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    sender_id: Mapped[str] = mapped_column(String(40), index=True)
+    recipient_id: Mapped[str] = mapped_column(String(40), index=True)
+    message: Mapped[str] = mapped_column(String(2000))
+    created_at: Mapped[str] = mapped_column(default=now)
+
+
+class SupportMessage(Base):
+    __tablename__ = "support_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(40), index=True)
+    message: Mapped[str] = mapped_column(String(2000))
+    created_at: Mapped[str] = mapped_column(default=now)

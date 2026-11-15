@@ -30,6 +30,7 @@ export interface ChatAnswer {
   action: { resource: 'team_workspace' } | null
   task_id?: string | null
   complete_task?: Pick<Task, 'id' | 'title'> | null
+  needs_human?: boolean
 }
 export interface AccessRequest {
   intern_name?: string

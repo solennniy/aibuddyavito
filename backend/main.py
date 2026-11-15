@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
@@ -14,8 +15,8 @@ from sqlalchemy import URL, create_engine, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from .assistant import ModelUnavailable, answer_question, context_intent, visible_documents
-from .store import AccessRequest, Base, MentorMessage, MockTicket, TaskProgress, now
+from .assistant import ModelUnavailable, answer_question, context_intent, intent, visible_documents
+from .store import AccessRequest, Base, MentorMessage, MentorReply, MockTicket, PeerMessage, SupportMessage, TaskProgress, now
 from .task_chat import checklist_answer, next_checklist_task
 
 
@@ -210,17 +211,90 @@ def create_app(database_path=None):
     def chat(body: ChatMessage, user: User):
         if body.task_id:
             owned_task(body.task_id, user)
+        question = body.message.casefold().replace("ё", "е")
+        other_person = re.search(r"\b(?:чуж\w*|друг\w* стажер\w*|коллег\w*|иван\w*|анн\w*)\b", question)
+        if other_person and re.search(r"(?:случайн|увидел|встретил|обнаружил)", question) and re.search(r"(?:заявк|данн)", question):
+            return {"answer": "Прекратите просмотр, не копируйте и не пересылайте данные. Сообщите о случившемся через предусмотренный организацией канал поддержки или безопасности. В демо контакты такого канала не указаны.",
+                    "sources": [], "mode": "demo", "action": None, "complete_task": None}
+        if other_person and re.search(r"заявк|прогресс|задач|данн|статус|зарплат|доход|оклад", question):
+            return {"answer": "Чужие персональные данные и зарплаты недоступны. Стажёр видит только свои заявки и прогресс; наставник видит данные закреплённых за ним стажёров в своём кабинете.",
+                    "sources": [], "mode": "demo", "action": None, "complete_task": None}
+        if re.search(r"\b(?:согласу\w*|подтверди\w*|отправ\w*)\b", question) and re.search(r"без (?:моего участия|подтверждения|разрешения)", question):
+            return {"answer": "Отправка заявки требует вашего явного подтверждения. Согласование выполняет наставник в своём кабинете; помощник не выполняет эти действия самостоятельно.",
+                    "sources": [], "mode": "demo", "action": None, "complete_task": None}
+        if re.search(r"(?:выдай|дай|измени|повыс\w*|назнач\w*|предостав\w*)", question) and re.search(r"(?:прав|роль|администратор)", question):
+            return {"answer": "Помощник не меняет роли и не выдаёт права администратора. Подготовьте запрос через предусмотренный владельцем системы порядок; в демо доступна учебная заявка на пространство команды.",
+                    "sources": [], "mode": "demo", "action": None, "complete_task": None}
+        guide = None
+        if re.search(r"(?:согласовал|одобрил)", question) and re.search(r"(?:доступ|выдан|открыт)", question):
+            guide = "Согласование заявки не означает выдачу доступа. Дождитесь статуса «Доступ выдан» и проверьте, открывается ли пространство под вашей учётной записью."
+        elif re.search(r"(?:отклон|отказал)", question) and re.search(r"заявк", question):
+            guide = "Если заявку отклонили, уточните причину у наставника, исправьте данные и подготовьте новую заявку. Статус и историю можно посмотреть в «Моих заявках»."
+        elif re.search(r"(?:ошибк|не удал|не получ)", question) and re.search(r"отправ", question):
+            guide = "Ошибка отправки означает, что сервис не подтвердил приём. Откройте эту же заявку и повторите отправку; повтор не создаёт дубликат."
+        elif re.search(r"(?:повтор|еще раз)", question) and re.search(r"отправ", question):
+            guide = "Откройте существующую заявку в «Моих заявках» и повторите отправку. Система повторно использует ту же заявку и не создаёт дубликат."
+        elif re.search(r"(?:согласу|согласова|решени|рассматрива|рассмотр)", question) and re.search(r"заявк", question) and not re.search(r"(?:мой статус|статус моей|статус заявки)", question):
+            guide = "В демо отправленную заявку рассматривает наставник закреплённого стажёра. Причина ожидания и срок рассмотрения в системе не указаны. Проверьте статус в «Моих заявках»; пока ждёте, можно выполнять другие пункты чек-листа."
+        elif re.search(r"(?:мои заявк|мои заявк|истори\w* заяв)", question) and re.search(r"(?:где|посмотр|найти|открыть)", question):
+            guide = "Откройте раздел «Мои заявки». Там показаны ваши черновики, отправленные заявки, номера и текущие статусы."
+        elif re.search(r"черновик", question) and re.search(r"(?:провер|перед отправ)", question):
+            guide = "В черновике проверьте, что выбрано пространство команды и указана понятная причина доступа. Затем нажмите «Подтвердить отправку»; до подтверждения заявка не отправляется."
+        elif re.search(r"номер", question) and re.search(r"заявк", question):
+            guide = "Номер помогает найти отправленную заявку в «Моих заявках» и проверить её статус."
+        elif re.search(r"(?:причин|зачем нужен доступ)", question) and re.search(r"(?:заявк|доступ)", question):
+            guide = "В причине укажите рабочую задачу, для которой нужно пространство. Например: «Нужно изучить архитектуру команды и подготовить первый PR». Проверьте текст в черновике перед отправкой."
+        elif re.search(r"(?:проверить|проверя)", question) and re.search(r"(?:доступ|пространств)", question) and re.search(r"(?:открыва|работа)", question):
+            guide = "После статуса «Доступ выдан» попробуйте открыть пространство команды под своей учётной записью. Если оно не открывается, проверьте адрес и учётную запись и сохраните текст ошибки без паролей."
+        elif re.search(r"(?:записа|сохран)", question) and re.search(r"(?:промежуточн|результат|заметк)", question):
+            guide = "Запишите промежуточный результат в доступном вам документе: цель, что сделано, полученный результат, сложности и следующий шаг. В этом прототипе сохраняются отметки задач, а хранение текстовых заметок не предусмотрено. В чате можно сообщить о выполненном пункте и подтвердить отметку."
+        elif re.search(r"(?:завершен\w*|закрыт\w*|законч\w*) практик", question):
+            guide = "Откройте в чек-листе пункт «Уточнить правила закрытия практики». Подготовьте перечень выполненных задач и необходимые учебные материалы, затем уточните у куратора порядок и сроки оформления практики. Конкретные требования и даты в учебном прототипе не указаны."
+        if guide and intent(body.message) != "tools-access":
+            return {"answer": guide, "sources": [], "mode": "demo", "action": None, "complete_task": None}
+        if re.search(r"(?:прогресс|статус адаптац|выполнен\w* задач|сколько.*(?:задач|выполнил))", question) and re.search(r"(?:мой|моего|мне|у меня|мои|какой|сколько|покажи|статус)", question):
+            items = tasks(user)["tasks"]
+            count = sum(item["status"] == "completed" for item in items)
+            upcoming = next_checklist_task(items)
+            answer = f"В вашем чек-листе выполнено {count} из {len(items)} задач."
+            if upcoming:
+                answer += f" Следующий пункт: «{upcoming['title']}». {upcoming['description']}"
+            else:
+                answer += " Все задачи отмечены выполненными."
+            return {"answer": answer, "sources": [], "mode": "demo", "action": None,
+                    "complete_task": None, "task_id": upcoming["id"] if upcoming else None}
         topic = context_intent(body.message, body.previous_question)
+        if re.search(r"задач\w* следующ", question):
+            topic = "next-task"
+        if topic == "next-task" and intent(body.message) not in (None, "onboarding", "progress"):
+            topic = None
         if body.task_id and body.message.casefold().strip(" .?!") in {"с чего начать", "что делать сейчас"}:
             topic = None
         if topic != "request-status":
             with Session(engine) as db:
                 items = [task_state(task, user, db) for task in CHECKLIST.values()
                          if task["assigned_role"] == user["role"]]
+            focused_id = body.task_id
+            if not focused_id and body.previous_question and re.match(
+                r"^(?:а\s+)?(?:как (?:это|ее|его)|что (?:конкретно|именно|нужно)|с чего начать)", question
+            ):
+                previous = checklist_answer(body.previous_question, items, user["role"])
+                focused_id = previous.get("task_id") if previous else None
             checklist = checklist_answer(
-                body.message, items, user["role"], body.task_id, next_step=topic == "next-task",
+                body.message, items, user["role"], focused_id, next_step=topic == "next-task" and not focused_id,
             )
             if checklist:
+                specialized = intent(body.message) in {
+                    "tools-access", "privacy", "git-branch", "review",
+                    "test-running", "team-docs", "progress", "planning", "milestones",
+                }
+                if specialized and not checklist["complete_task"] and "?" in body.message:
+                    try:
+                        response = answer_question(body.message, user["role"], body.previous_question)
+                    except ModelUnavailable as exc:
+                        raise HTTPException(503, "Не удалось получить ответ модели. Повторите попытку.") from exc
+                    response["task_id"] = checklist.get("task_id")
+                    return response
                 return checklist
         if topic == "request-status":
             entries = requests(user)["requests"]
@@ -292,6 +366,107 @@ def create_app(database_path=None):
             return {"messages": [{"id": item.id, "intern_name": assigned[item.owner],
                                   "message": item.message, "created_at": item.created_at}
                                  for item in messages]}
+
+    def authorize_conversation(intern_id, user):
+        if user["role"] == "intern" and intern_id == user["id"]:
+            return
+        if user["role"] == "mentor" and intern_id in MENTOR_INTERNS.get(user["id"], {}):
+            return
+        raise HTTPException(404, "Диалог не найден.")
+
+    @app.get("/api/mentor/conversations")
+    def conversations(user: User):
+        if user["role"] != "mentor":
+            raise HTTPException(403, "Доступно наставнику.")
+        assigned = MENTOR_INTERNS.get(user["id"], {})
+        return {"conversations": [{"intern_id": intern_id, "intern_name": name}
+                                  for intern_id, name in assigned.items()]}
+
+    @app.get("/api/mentor/conversations/{intern_id}")
+    def conversation(intern_id: str, user: User):
+        authorize_conversation(intern_id, user)
+        with Session(engine) as db:
+            incoming = db.scalars(select(MentorMessage).where(MentorMessage.owner == intern_id))
+            outgoing = db.scalars(select(MentorReply).where(MentorReply.owner == intern_id))
+            messages = [{"id": item.id, "sender": "intern", "message": item.message, "created_at": item.created_at}
+                        for item in incoming]
+            messages.extend({"id": item.id, "sender": "mentor", "message": item.message, "created_at": item.created_at}
+                            for item in outgoing)
+            return {"messages": sorted(messages, key=lambda item: (item["created_at"], item["id"]))}
+
+    @app.post("/api/mentor/conversations/{intern_id}", status_code=201)
+    def reply_to_intern(intern_id: str, body: Message, user: User):
+        authorize_conversation(intern_id, user)
+        if user["role"] != "mentor":
+            raise HTTPException(403, "Ответ наставника доступен наставнику.")
+        with Session(engine) as db:
+            reply = MentorReply(id=str(uuid4()), owner=intern_id, mentor_id=user["id"], message=body.message)
+            db.add(reply)
+            db.commit()
+            return {"id": reply.id, "status": "sent"}
+
+    def peer_user(peer_id, user):
+        peer = next((candidate for candidate in USERS.values() if candidate["id"] == peer_id), None)
+        if (user["role"] != "intern" or not peer or peer["role"] != "intern"
+                or peer["id"] == user["id"] or peer["team_id"] != user["team_id"]):
+            raise HTTPException(404, "Диалог не найден.")
+        return peer
+
+    @app.get("/api/peer/conversations")
+    def peer_conversations(user: User):
+        require_intern(user)
+        return {"conversations": [{"id": candidate["id"], "name": candidate["name"]}
+                for candidate in USERS.values() if candidate["role"] == "intern"
+                and candidate["team_id"] == user["team_id"] and candidate["id"] != user["id"]]}
+
+    @app.get("/api/chat/contacts")
+    def chat_contacts(user: User):
+        if user["role"] == "mentor":
+            return {"contacts": [{"id": intern_id, "name": name, "kind": "mentor"}
+                    for intern_id, name in MENTOR_INTERNS.get(user["id"], {}).items()]}
+        mentors = [{"id": candidate["id"], "name": candidate["name"], "kind": "mentor"}
+                   for candidate in USERS.values() if candidate["role"] == "mentor"
+                   and user["id"] in MENTOR_INTERNS.get(candidate["id"], {})]
+        peers = [{"id": candidate["id"], "name": candidate["name"], "kind": "peer"}
+                 for candidate in USERS.values() if candidate["role"] == "intern"
+                 and candidate["id"] != user["id"] and candidate["team_id"] == user["team_id"]]
+        return {"contacts": mentors + peers}
+
+    @app.get("/api/support/messages")
+    def support_messages(user: User):
+        with Session(engine) as db:
+            rows = db.scalars(select(SupportMessage).where(SupportMessage.owner == user["id"])
+                              .order_by(SupportMessage.created_at, SupportMessage.id))
+            return {"messages": [{"id": row.id, "message": row.message, "created_at": row.created_at}
+                                 for row in rows]}
+
+    @app.post("/api/support/messages", status_code=201)
+    def send_support_message(body: Message, user: User):
+        with Session(engine) as db:
+            message = SupportMessage(id=str(uuid4()), owner=user["id"], message=body.message)
+            db.add(message)
+            db.commit()
+            return {"id": message.id, "status": "saved"}
+
+    @app.get("/api/peer/conversations/{peer_id}")
+    def peer_conversation(peer_id: str, user: User):
+        peer_user(peer_id, user)
+        with Session(engine) as db:
+            rows = db.scalars(select(PeerMessage).where(
+                ((PeerMessage.sender_id == user["id"]) & (PeerMessage.recipient_id == peer_id))
+                | ((PeerMessage.sender_id == peer_id) & (PeerMessage.recipient_id == user["id"]))
+            ).order_by(PeerMessage.created_at, PeerMessage.id))
+            return {"messages": [{"id": item.id, "sender": "me" if item.sender_id == user["id"] else "peer",
+                                  "message": item.message, "created_at": item.created_at} for item in rows]}
+
+    @app.post("/api/peer/conversations/{peer_id}", status_code=201)
+    def send_peer_message(peer_id: str, body: Message, user: User):
+        peer_user(peer_id, user)
+        with Session(engine) as db:
+            message = PeerMessage(id=str(uuid4()), sender_id=user["id"], recipient_id=peer_id, message=body.message)
+            db.add(message)
+            db.commit()
+            return {"id": message.id, "status": "sent"}
 
     @app.post("/api/requests", status_code=201)
     def create_draft(

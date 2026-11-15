@@ -44,9 +44,9 @@ def test_demo_auth_and_knowledge(client):
         assert client.get(path).status_code == 401
     assert client.get("/api/me", headers={"Authorization": "Bearer forged"}).status_code == 401
     assert client.get("/api/me", headers=ANNA).json()["id"] == "intern-001"
-    assert {d["id"] for d in client.get("/api/knowledge", headers=ANNA).json()["documents"]} == {
-        "onboarding", "team-space", "first-pr", "first-meeting"
-    }
+    available = {d["id"] for d in client.get("/api/knowledge", headers=ANNA).json()["documents"]}
+    assert {"onboarding", "team-space", "first-pr", "first-meeting", "tools-access"} <= available
+    assert "mentor-only" not in available
     assert "mentor-only" in {d["id"] for d in client.get("/api/knowledge", headers=MENTOR).json()["documents"]}
 
 
@@ -124,7 +124,7 @@ def test_chat_sources_and_action_permission(client):
     assert client.post("/api/chat", json={"message": "Какой сегодня курс?"}, headers=ANNA).json()["sources"] == []
     for question, source in (("Как оформить первый PR?", "first-pr"),
                              ("Как представиться команде?", "first-meeting"),
-                             ("Confluence меня не пускает", "team-space")):
+                             ("Confluence меня не пускает", "tools-access")):
         assert client.post("/api/chat", json={"message": question}, headers=ANNA).json()["sources"][0]["id"] == source
     for body in ([], {"message": 123}, {"message": "  "}, {"message": "x" * 2001}):
         result = client.post("/api/chat", json=body, headers=ANNA)
@@ -340,3 +340,80 @@ def test_database_failure_is_retryable(client, monkeypatch):
     result = client.get("/api/tasks", headers=ANNA)
     assert result.status_code == 503
     assert "internal path" not in result.text
+
+
+def test_chat_keeps_instruction_context_for_conversational_followups(client):
+    first = client.post("/api/chat", headers=ANNA, json={"message": "Как создать ветку?"}).json()
+    assert first["sources"][0]["id"] == "git-branch"
+    followup = client.post("/api/chat", headers=ANNA, json={
+        "message": "А как проверить?", "previous_question": "Как создать ветку?",
+    }).json()
+    assert followup["sources"][0]["id"] == "git-branch"
+    assert "git branch --show-current" in followup["answer"]
+    assert followup["action"] is None
+
+
+def test_chat_does_not_treat_a_new_topic_as_a_followup(client):
+    response = client.post("/api/chat", headers=ANNA, json={
+        "message": "Как получить доступ к пространству команды?",
+        "previous_question": "Как создать ветку?",
+    }).json()
+    assert response["sources"][0]["id"] == "team-space"
+
+
+def test_mentor_conversation_is_two_way_and_private(client, monkeypatch):
+    monkeypatch.setitem(main.MENTOR_INTERNS, "mentor-001", {"intern-001": "Анна"})
+    assert client.post("/api/mentor/messages", headers=ANNA, json={"message": "Подскажите по задаче"}).status_code == 201
+    assert client.get("/api/mentor/conversations", headers=ANNA).status_code == 403
+    assert client.get("/api/mentor/conversations", headers=MENTOR).json()["conversations"] == [
+        {"intern_id": "intern-001", "intern_name": "Анна"}
+    ]
+    path = "/api/mentor/conversations/intern-001"
+    assert client.get(path, headers=IVAN).status_code == 404
+    assert client.post(path, headers=ANNA, json={"message": "Ответ"}).status_code == 403
+    assert client.post(path, headers=MENTOR, json={"message": "Начните с README"}).status_code == 201
+    for headers in (ANNA, MENTOR):
+        messages = client.get(path, headers=headers).json()["messages"]
+        assert [(item["sender"], item["message"]) for item in messages] == [
+            ("intern", "Подскажите по задаче"), ("mentor", "Начните с README")
+        ]
+    assert client.get("/api/mentor/conversations/intern-002", headers=MENTOR).status_code == 404
+
+
+def test_mentor_reply_survives_restart(tmp_path):
+    database = tmp_path / "chat.sqlite3"
+    path = "/api/mentor/conversations/intern-001"
+    with TestClient(main.create_app(database)) as client:
+        assert client.post(path, headers=MENTOR, json={"message": "Ответ после перезапуска"}).status_code == 201
+    with TestClient(main.create_app(database)) as client:
+        assert client.get(path, headers=ANNA).json()["messages"][0]["message"] == "Ответ после перезапуска"
+
+
+def test_interns_can_exchange_private_messages_and_keep_them(tmp_path, monkeypatch):
+    database = tmp_path / "peer.sqlite3"
+    with TestClient(main.create_app(database)) as client:
+        contacts = client.get("/api/chat/contacts", headers=ANNA).json()["contacts"]
+        assert {item["id"] for item in contacts} == {"intern-002", "mentor-001"}
+        path = "/api/peer/conversations/intern-002"
+        assert client.post(path, headers=ANNA, json={"message": "Привет!"}).status_code == 201
+        assert client.post("/api/peer/conversations/intern-001", headers=IVAN, json={"message": "Привет, Анна!"}).status_code == 201
+        assert client.get(path, headers=MENTOR).status_code == 404
+        assert client.get("/api/peer/conversations/intern-001", headers=ANNA).status_code == 404
+        monkeypatch.setitem(main.USERS, "outsider", main.demo_user("intern-other", "Другой", "intern"))
+        main.USERS["outsider"]["team_id"] = "other-team"
+        assert client.get("/api/peer/conversations/intern-001", headers={"Authorization": "Bearer outsider"}).status_code == 404
+    with TestClient(main.create_app(database)) as client:
+        history = client.get("/api/peer/conversations/intern-001", headers=IVAN).json()["messages"]
+        assert [(item["sender"], item["message"]) for item in history] == [
+            ("peer", "Привет!"), ("me", "Привет, Анна!")
+        ]
+
+
+def test_demo_support_messages_are_private_and_persistent(tmp_path):
+    database = tmp_path / "support.sqlite3"
+    with TestClient(main.create_app(database)) as client:
+        assert client.post("/api/support/messages", json={"message": "Нужна помощь"}).status_code == 401
+        assert client.post("/api/support/messages", headers=ANNA, json={"message": "Нужна помощь"}).status_code == 201
+        assert client.get("/api/support/messages", headers=IVAN).json()["messages"] == []
+    with TestClient(main.create_app(database)) as client:
+        assert client.get("/api/support/messages", headers=ANNA).json()["messages"][0]["message"] == "Нужна помощь"

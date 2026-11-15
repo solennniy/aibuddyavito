@@ -3,6 +3,7 @@ import { Link, NavLink, Navigate, Route, Routes, useSearchParams } from 'react-r
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type AccessRequest, type ChatAnswer, type DemoUser, type Document, type Task, type User } from './api'
 import avitoLogo from './assets/avito-logo.webp?url'
+import chatAvatars from './assets/chat-avatars.webp?url'
 
 const periods: Record<string, string> = {
   week_1: 'Первая неделя', week_2: 'Вторая неделя', month_1: 'Первый месяц',
@@ -38,12 +39,24 @@ function RequestHistory({ requests, actions }: { requests: AccessRequest[]; acti
     </li>)}</ul> : <p className="muted">Заявок пока нет.</p>
 }
 
-function Dashboard({ user, tasks, requests, firstTask }: { user: User; tasks: Task[]; requests: AccessRequest[]; firstTask?: FirstTask | null }) {
+function Dashboard({ user, tasks, requests, firstTask, openAssistant }: { user: User; tasks: Task[]; requests: AccessRequest[]; firstTask?: FirstTask | null; openAssistant: (question?: string) => void }) {
   const completed = tasks.filter(task => task.status === 'completed').length
   const upcoming = tasks.filter(task => task.status === 'todo' || task.status === 'in_progress')
   const blocked = tasks.filter(task => task.status === 'blocked')
+  const mentor = user.role === 'mentor'
+  const allCompleted = tasks.length > 0 && completed === tasks.length
   return <>
-    <header className="intro"><h1>Здравствуйте, {user.name}</h1><p>Ваш план адаптации и заявки в пространство команды</p></header>
+    {!mentor && <section className="buddy-hero">
+      <div><p className="buddy-eyebrow">AI Buddy · помощник стажёра</p><h1>Привет, {user.name}!</h1><p>Помогу разобраться с адаптацией, доступами и первой задачей.</p>
+        <button type="button" onClick={() => openAssistant()}>Спросить AI Buddy</button>
+      </div>
+      <div className="buddy-hero-avatar"><ChatAvatar kind="ai" /></div>
+    </section>}
+    {!mentor && <div className="buddy-shortcuts" aria-label="Быстрые вопросы">
+      {['Как получить доступ к пространству команды?', 'Где найти документацию команды?', 'Как начать первую задачу?', 'Как посмотреть прогресс?'].map(question =>
+        <button type="button" key={question} onClick={() => openAssistant(question)}>{question}<span aria-hidden="true">↗</span></button>)}
+    </div>}
+    {mentor && <header className="intro"><h1>Здравствуйте, {user.name}</h1><p>Задачи наставника и заявки закреплённых стажёров</p></header>}
     <div className="dashboard">
       <section className="panel timeline">
         <h2>{user.role === 'mentor' ? 'Задачи наставника' : 'Прогресс адаптации'}</h2>
@@ -51,11 +64,11 @@ function Dashboard({ user, tasks, requests, firstTask }: { user: User; tasks: Ta
           <p className="metric">{completed} <span>из {tasks.length} задач выполнено</span></p>
           <strong>{tasks.length ? Math.round(completed / tasks.length * 100) : 0}%</strong>
         </div>
-        <progress aria-label="Прогресс адаптации" aria-valuetext={`${completed} из ${tasks.length} задач выполнено`} value={completed} max={tasks.length || 1} />
-        <p className="progress-note">Полоса показывает долю задач, отмеченных выполненными в чек-листе.</p>
-        <ol className="periods">{Object.entries(periods).map(([key, title]) =>
-          <li key={key} aria-current={upcoming[0]?.period === key ? 'step' : undefined}>{title}</li>
-        )}</ol>
+        <progress aria-label={mentor ? 'Выполнение задач наставника' : 'Прогресс адаптации'} aria-valuetext={`${completed} из ${tasks.length} задач выполнено`} value={completed} max={tasks.length || 1} />
+        <p className="progress-note">{allCompleted
+          ? mentor ? 'Все задачи наставника в чек-листе выполнены. Проверяйте новые заявки стажёров.' : 'Все задачи чек-листа выполнены. Можно вернуться к ним и проверить отметки.'
+          : 'Полоса показывает долю задач, отмеченных выполненными в чек-листе.'}</p>
+        {allCompleted && <Link to={mentor ? '/requests' : '/checklist'}>{mentor ? 'Посмотреть заявки стажёров' : 'Открыть чек-лист'}</Link>}
       </section>
       {user.role === 'intern' && <section className="panel next-step"><h2>Первая рабочая задача</h2>
         <p><strong>{firstTask?.title ?? 'Доступ к команде'}</strong></p>
@@ -71,7 +84,7 @@ function Dashboard({ user, tasks, requests, firstTask }: { user: User; tasks: Ta
       <section className="panel">
         <h2>Ближайшие задачи</h2>
         <ul className="rows">{upcoming.slice(0, 4).map(task => <li key={task.id} className="row">{task.title}<span className="status">{statuses[task.status]}</span></li>)}</ul>
-        {!upcoming.length && <p className="muted">Ближайших задач нет.</p>}
+        {!upcoming.length && <p className="muted">{allCompleted ? 'Все задачи выполнены.' : 'Ближайших задач нет.'}</p>}
         <Link to="/checklist">Открыть чек-лист</Link>
       </section>
       <section className="panel"><h2>{user.role === 'mentor' ? 'Заявки стажёров' : 'Последние заявки'}</h2><RequestHistory requests={requests.slice(0, 3)} /><Link to="/requests">Открыть заявки</Link></section>
@@ -80,16 +93,16 @@ function Dashboard({ user, tasks, requests, firstTask }: { user: User; tasks: Ta
   </>
 }
 
-function Checklist({ tasks, token }: { tasks: Task[]; token: string }) {
+function Checklist({ tasks, token, role }: { tasks: Task[]; token: string; role: string }) {
   const client = useQueryClient()
   const change = useMutation({
     mutationFn: (task: Task) => api<Task>('/tasks/' + encodeURIComponent(task.id), token, { status: task.status === 'completed' ? 'todo' : 'completed' }, 'PATCH'),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tasks', token] }),
   })
   const groups = Map.groupBy(tasks, task => task.period)
-  return <><header className="intro"><h1>Чек-лист адаптации</h1></header>
+  return <><header className="intro"><h1>{role === 'mentor' ? 'Задачи наставника' : 'Чек-лист адаптации'}</h1><p>Задачи сгруппированы по периодам стажировки. Периоды показывают, когда их предполагается выполнять.</p></header>
     {change.error && <ErrorNotice error={change.error} />}
-    {!tasks.length && <p>У этой роли нет задач стажёра.</p>}
+    {!tasks.length && <p>Задач пока нет.</p>}
     {Array.from(groups, ([period, entries]) => <section className="panel stack" key={period}>
       <h2>{periods[period] ?? period}</h2>
       <ul className="rows">{entries.map(task => <li key={task.id} className="row">
@@ -105,19 +118,108 @@ function Checklist({ tasks, token }: { tasks: Task[]; token: string }) {
   </>
 }
 
-function Assistant({ token, canRequest, history, addEntry, onClose }: {
+type ChatChoice = { id: string; name: string; kind: 'mentor' | 'peer' }
+
+function ChatAvatar({ kind }: { kind: 'ai' | 'support' | 'anna' | 'ivan' | 'mentor' }) {
+  return <span className={`chat-avatar avatar-${kind}`} style={{ backgroundImage: `url(${chatAvatars})` }} aria-hidden="true">
+    {kind === 'ai' && <span className="avatar-brand"><img src={avitoLogo} alt="" /></span>}
+  </span>
+}
+
+function PersonConversation({ token, user, choice, initialMessage = '' }: { token: string; user: User; choice: ChatChoice; initialMessage?: string }) {
+  const client = useQueryClient()
+  const [message, setMessage] = useState(initialMessage)
+  const path = choice.kind === 'peer' ? '/peer/conversations/' + encodeURIComponent(choice.id)
+    : '/mentor/conversations/' + encodeURIComponent(user.role === 'mentor' ? choice.id : user.id)
+  const thread = useQuery({
+    queryKey: ['conversation', token, path],
+    queryFn: () => api<{ messages: { id: string; sender: string; message: string; created_at: string }[] }>(path, token),
+    refetchInterval: 5000,
+  })
+  const send = useMutation({
+    mutationFn: (text: string) => api<{ id: string }>(
+      choice.kind === 'mentor' && user.role === 'intern' ? '/mentor/messages' : path,
+      token, { message: text },
+    ),
+    onSuccess: () => { setMessage(''); void client.invalidateQueries({ queryKey: ['conversation', token, path] }) },
+  })
+  return <section className="panel conversation">
+      {thread.isPending && <p role="status">Загружаем переписку…</p>}
+      {thread.error && <ErrorNotice error={thread.error} retry={() => void thread.refetch()} />}
+      {thread.data?.messages.length === 0 && <p>Сообщений пока нет.</p>}
+      <div className="messages" aria-label="Переписка" aria-live="polite">{thread.data?.messages.map(item =>
+        <p key={item.id} className={(choice.kind === 'peer' ? item.sender === 'me' : item.sender === user.role) ? 'asked' : 'reply'}>{item.message}</p>
+      )}</div>
+      <form className="composer" onSubmit={event => { event.preventDefault(); if (message.trim() && !send.isPending) send.mutate(message.trim()) }}>
+        <label htmlFor="person-message">Сообщение</label>
+        <textarea id="person-message" value={message} onChange={event => setMessage(event.target.value)} maxLength={2000} required />
+        <button disabled={send.isPending}>{send.isPending ? 'Отправляем…' : 'Отправить'}</button>
+      </form>
+      {send.error && <ErrorNotice error={send.error} retry={() => send.mutate(send.variables!)} />}
+  </section>
+}
+
+function ContactRow({ token, user, choice, onSelect }: { token: string; user: User; choice: ChatChoice; onSelect: () => void }) {
+  const path = choice.kind === 'peer' ? '/peer/conversations/' + encodeURIComponent(choice.id)
+    : '/mentor/conversations/' + encodeURIComponent(user.role === 'mentor' ? choice.id : user.id)
+  const thread = useQuery({
+    queryKey: ['conversation', token, path],
+    queryFn: () => api<{ messages: { message: string }[] }>(path, token),
+    refetchInterval: 5000,
+  })
+  const last = thread.data?.messages.at(-1)?.message
+  return <button className="chat-list-item" type="button" onClick={onSelect}>
+    <ChatAvatar kind={choice.name === 'Анна' ? 'anna' : choice.name === 'Иван' ? 'ivan' : 'mentor'} />
+    <span className="chat-list-copy"><strong>{choice.name}</strong><span>{thread.isPending ? 'Загружаем…' : thread.error ? 'Не удалось загрузить' : last ?? 'Начать переписку'}</span></span>
+  </button>
+}
+
+function SupportConversation({ token }: { token: string }) {
+  const client = useQueryClient()
+  const [message, setMessage] = useState('')
+  const thread = useQuery({
+    queryKey: ['support', token],
+    queryFn: () => api<{ messages: { id: string; message: string }[] }>('/support/messages', token),
+  })
+  const send = useMutation({
+    mutationFn: (text: string) => api<{ id: string }>('/support/messages', token, { message: text }),
+    onSuccess: () => { setMessage(''); void client.invalidateQueries({ queryKey: ['support', token] }) },
+  })
+  return <section className="panel conversation">
+    <p className="muted">Учебная поддержка. Сообщения сохраняются в демо, сотрудники поддержки к нему не подключены.</p>
+    {thread.isPending && <p role="status">Загружаем переписку…</p>}
+    {thread.error && <ErrorNotice error={thread.error} retry={() => void thread.refetch()} />}
+    <div className="messages" aria-live="polite">{thread.data?.messages.map(item => <p key={item.id} className="asked">{item.message}</p>)}</div>
+    <form className="composer" onSubmit={event => { event.preventDefault(); if (message.trim() && !send.isPending) send.mutate(message.trim()) }}>
+      <label htmlFor="support-message">Вопрос в поддержку</label>
+      <textarea id="support-message" value={message} onChange={event => setMessage(event.target.value)} maxLength={2000} required />
+      <button disabled={send.isPending}>{send.isPending ? 'Сохраняем…' : 'Отправить'}</button>
+    </form>
+    {send.error && <ErrorNotice error={send.error} retry={() => send.mutate(send.variables!)} />}
+  </section>
+}
+
+function Assistant({ token, user, canRequest, history, addEntry, onClose, initialQuestion }: {
   token: string
+  user: User
   canRequest: boolean
   history: ChatEntry[]
   addEntry: (entry: ChatEntry) => void
   onClose: () => void
+  initialQuestion?: string | null
 }) {
   const client = useQueryClient()
-  const [question, setQuestion] = useState('')
-  const [mentorQuestion, setMentorQuestion] = useState('')
-  const mentor = useMutation({
-    mutationFn: (message: string) => api<{ id: string }>('/mentor/messages', token, { message }),
-    onSuccess: () => setMentorQuestion(''),
+  const [question, setQuestion] = useState(initialQuestion ?? '')
+  const [view, setView] = useState<'list' | 'ai' | 'support' | 'person'>(initialQuestion !== null && initialQuestion !== undefined ? 'ai' : 'list')
+  const [choice, setChoice] = useState<ChatChoice | null>(null)
+  const [handoffMessage, setHandoffMessage] = useState('')
+  const unresolved = history.reduce((count, entry) => entry.question
+    ? entry.result.needs_human ? count + 1 : 0
+    : count, 0)
+  const contacts = useQuery({
+    queryKey: ['chat-contacts', token],
+    queryFn: () => api<{ contacts: ChatChoice[] }>('/chat/contacts', token),
+    refetchInterval: 10000,
   })
   const send = useMutation({
     mutationFn: (message: string) => api<ChatAnswer>('/chat', token, {
@@ -149,17 +251,37 @@ function Assistant({ token, canRequest, history, addEntry, onClose }: {
     }
   }
   return <>
-    <header className="chat-heading"><h2>Сообщения</h2><button type="button" className="chat-close" aria-label="Свернуть сообщения" onClick={onClose}><Chevron down /></button></header>
+    <header className="chat-heading">{view !== 'list' && <button type="button" className="chat-back" aria-label="Назад к чатам" onClick={() => setView('list')}>‹</button>}<h2>{view === 'person' ? choice?.name : view === 'ai' ? 'AI Buddy' : view === 'support' ? 'Поддержка' : 'Сообщения'}</h2><button type="button" className="chat-close" aria-label="Свернуть сообщения" onClick={onClose}><Chevron down /></button></header>
+    {view === 'list' && <div className="chat-list">
+      {canRequest ? <button className="chat-list-item support-item" type="button" onClick={() => setView('ai')}><ChatAvatar kind="ai" /><span className="chat-list-copy"><strong>AI Buddy</strong><span>{history.at(-1)?.result.answer ?? 'Помощь с адаптацией'}</span></span></button>
+        : <button className="chat-list-item support-item" type="button" onClick={() => setView('support')}><ChatAvatar kind="support" /><span className="chat-list-copy"><strong>Спросить поддержку</strong><span>Учебный прототип</span></span></button>}
+      {contacts.isPending && <p className="chat-list-status" role="status">Загружаем чаты…</p>}
+      {contacts.error && <ErrorNotice error={contacts.error} retry={() => void contacts.refetch()} />}
+      {contacts.data?.contacts.filter(contact => !canRequest || contact.kind !== 'mentor').map(contact => <ContactRow key={contact.kind + contact.id} token={token} user={user} choice={contact} onSelect={() => { setHandoffMessage(''); setChoice(contact); setView('person') }} />)}
+      {contacts.data?.contacts.length === 0 && <p className="chat-list-status">Пока нет доступных собеседников.</p>}
+    </div>}
+    {view === 'support' && <SupportConversation token={token} />}
+    {view === 'person' && choice && <PersonConversation key={choice.kind + choice.id} token={token} user={user} choice={choice} initialMessage={handoffMessage} />}
+    {view === 'ai' && canRequest &&
     <div className="assistant-layout">
       <section className="panel conversation">
         <div className="messages" aria-live="polite">
           <p className="chat-participant"><strong>AI Buddy</strong></p>
           <p className="intro-message">{canRequest ? 'Спросите про задачу или напишите, что уже сделали.' : 'Спросите про этапы адаптации или откройте обращения стажёров.'}</p>
-          {!canRequest && <Link to="/requests#mentor-messages" onClick={onClose}>Открыть обращения стажёров</Link>}
           {history.map(({ question: asked, result }, index) => <article key={index}>
             {asked && <p className="asked">{asked}</p>}<div className="reply"><strong>AI Buddy</strong><p>{result.answer}</p>
             {result.sources.length > 0 && <details className="sources"><summary>Источники</summary><ul>{result.sources.map(source => <li key={source.id}><Link to={'/knowledge#' + source.id} onClick={onClose}>{source.title}</Link></li>)}</ul></details>}
             {result.action && <Link className="button secondary" to="/requests" onClick={onClose}>Создать заявку</Link>}
+            {index === history.length - 1 && canRequest && unresolved >= 5 &&
+              contacts.data?.contacts.find(contact => contact.kind === 'mentor') &&
+              <button type="button" className="secondary" onClick={() => {
+                const mentor = contacts.data?.contacts.find(contact => contact.kind === 'mentor')
+                if (mentor) {
+                  setHandoffMessage(history.filter(entry => entry.question).slice(-5).map(entry => entry.question).join('\n'))
+                  setChoice(mentor)
+                  setView('person')
+                }
+              }}>Написать наставнику</button>}
             {result.complete_task && index === history.length - 1 && <button type="button" disabled={complete.isPending || send.isPending} onClick={() => complete.mutate(result.complete_task!.id)}>
               {complete.isPending ? 'Сохраняем…' : 'Подтвердить выполнение'}
             </button>}
@@ -175,8 +297,7 @@ function Assistant({ token, canRequest, history, addEntry, onClose }: {
           <button type="submit" disabled={send.isPending || complete.isPending}>Отправить</button>
         </form>
       </section>
-      {canRequest && <details className="mentor-help"><summary>Написать наставнику</summary><form className="composer" onSubmit={event => { event.preventDefault(); if (mentorQuestion.trim()) mentor.mutate(mentorQuestion.trim()) }}><label htmlFor="mentor-question">Вопрос наставнику</label><textarea id="mentor-question" value={mentorQuestion} onChange={event => setMentorQuestion(event.target.value)} maxLength={2000} required /><button disabled={mentor.isPending}>Отправить наставнику</button></form>{mentor.isSuccess && <p role="status">Обращение отправлено наставнику в демоверсии.</p>}{mentor.error && <ErrorNotice error={mentor.error} />}</details>}
-    </div>
+    </div>}
   </>
 }
 
@@ -298,7 +419,7 @@ function Knowledge({ token }: { token: string }) {
   </>
 }
 
-function Workspace({ token }: { token: string }) {
+function Workspace({ token, openAssistant }: { token: string; openAssistant: (question?: string) => void }) {
   const profile = useQuery({ queryKey: ['profile', token], queryFn: () => api<User>('/me', token) })
   const tasks = useQuery({ queryKey: ['tasks', token], queryFn: () => api<{ tasks: Task[]; first_task?: FirstTask | null }>('/tasks', token), refetchInterval: 5000 })
   const requests = useQuery({
@@ -311,8 +432,8 @@ function Workspace({ token }: { token: string }) {
   if (errors.length) return <ErrorNotice error={errors[0].error!} retry={() => errors.forEach(result => void result.refetch())} />
   if (!profile.data || !tasks.data || !requests.data) return <p role="status">Загружаем ваш маршрут…</p>
   return <Routes>
-    <Route path="/" element={<Dashboard user={profile.data} tasks={tasks.data.tasks} requests={requests.data.requests} firstTask={tasks.data.first_task} />} />
-    <Route path="/checklist" element={<Checklist tasks={tasks.data.tasks} token={token} />} />
+    <Route path="/" element={<Dashboard user={profile.data} tasks={tasks.data.tasks} requests={requests.data.requests} firstTask={tasks.data.first_task} openAssistant={openAssistant} />} />
+    <Route path="/checklist" element={<Checklist tasks={tasks.data.tasks} token={token} role={profile.data.role} />} />
     <Route path="/requests" element={<Requests token={token} user={profile.data} requests={requests.data.requests} />} />
     <Route path="/knowledge" element={<Knowledge token={token} />} />
     <Route path="*" element={<Navigate to="/" replace />} />
@@ -324,6 +445,9 @@ export function App() {
   const client = useQueryClient()
   const [preferred, setPreferred] = useState(() => sessionStorage.getItem('buddy-profile') ?? '')
   const [chatOpen, setChatOpen] = useState(false)
+  const [initialQuestion, setInitialQuestion] = useState<string | null>(null)
+  const [chatSession, setChatSession] = useState(0)
+  const openAssistant = (question = '') => { setInitialQuestion(question); setChatSession(value => value + 1); setChatOpen(true) }
   const [chatHistory, setChatHistory] = useState<ChatEntry[]>([])
   const [theme, setTheme] = useState(() => localStorage.getItem('buddy-theme') ?? 'system')
   useEffect(() => {
@@ -336,12 +460,13 @@ export function App() {
     <header className="topbar">
       <Link to="/" className="brand"><span className="brand-logo"><img src={avitoLogo} alt="Авито" /><img className="brand-logo-inverse" src={avitoLogo} alt="" aria-hidden="true" /></span><span>AI Buddy</span></Link>
       <div className="topbar-controls">
-      {current && <button type="button" className="messages-icon" aria-label="Сообщения" aria-expanded={chatOpen} aria-controls="buddy-messages" onClick={() => setChatOpen(open => !open)}><ChatIcon /></button>}
+      {current && <button type="button" className="messages-icon" aria-label="Сообщения" aria-expanded={chatOpen} aria-controls="buddy-messages" onClick={() => { setInitialQuestion(null); setChatOpen(open => !open) }}><ChatIcon /></button>}
       <NavLink to="/profile" className="profile-icon" aria-label="Открыть профиль" title="Профиль">
+        {current ? <ChatAvatar kind={current.name === 'Анна' ? 'anna' : current.name === 'Иван' ? 'ivan' : 'mentor'} /> :
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
             <circle cx="12" cy="8" r="3.25" />
             <path d="M5 20v-1a7 7 0 0 1 14 0v1" strokeLinecap="round" />
-          </svg>
+          </svg>}
       </NavLink>
       </div>
     </header>
@@ -382,12 +507,12 @@ export function App() {
           </select></label>
           </div>
         </section>} />
-          <Route path="*" element={current && <Workspace key={current.token} token={current.token} />} />
+          <Route path="*" element={current && <Workspace key={current.token} token={current.token} openAssistant={openAssistant} />} />
         </Routes>
         <footer>Демонстрационный прототип. Инструкции и сервис заявок учебные.</footer>
       </main>
     </div>
-    {current && !chatOpen && <button type="button" className="chat-launcher" aria-expanded={false} aria-controls="buddy-messages" onClick={() => setChatOpen(true)}>Сообщения<Chevron /></button>}
-    {current && chatOpen && <aside id="buddy-messages" className="chat-widget" aria-label="Чат AI Buddy"><Assistant token={current.token} canRequest={current.role === 'intern'} history={chatHistory} addEntry={entry => setChatHistory(old => [...old, entry])} onClose={() => setChatOpen(false)} /></aside>}
+    {current && !chatOpen && <button type="button" className="chat-launcher" aria-expanded={false} aria-controls="buddy-messages" onClick={() => { setInitialQuestion(null); setChatOpen(true) }}>Сообщения<Chevron /></button>}
+    {current && chatOpen && <aside id="buddy-messages" className="chat-widget" aria-label="Чат AI Buddy"><Assistant key={chatSession} token={current.token} user={current} canRequest={current.role === 'intern'} history={chatHistory} initialQuestion={initialQuestion} addEntry={entry => setChatHistory(old => [...old, entry])} onClose={() => { setChatOpen(false); setInitialQuestion(null) }} /></aside>}
   </>
 }
