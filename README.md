@@ -77,6 +77,7 @@ npm run test:e2e
 
 ## Материалы
 
+- [Продуктовая презентация (PDF)](docs/ai-buddy-deck.pdf)
 - [Требования и допущения](docs/requirements.md)
 - [Спецификация](docs/spec.md)
 - [Сценарий видео](docs/demo.md)
